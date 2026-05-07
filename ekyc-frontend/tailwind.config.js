@@ -1,0 +1,70 @@
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  theme: {
+    extend: {
+      fontFamily: {
+        sans: ['IBM Plex Sans', 'sans-serif'],
+        mono: ['IBM Plex Mono', 'monospace'],
+      },
+      colors: {
+        brand: {
+          50:  '#eef4ff',
+          100: '#d9e8ff',
+          200: '#bcd6ff',
+          300: '#8ebcff',
+          400: '#5e97ff',
+          500: '#3b72ff',
+          600: '#1d4fff',
+          700: '#1540e8',
+          800: '#1535bb',
+          900: '#163093',
+          950: '#111d5e',
+        },
+        surface: {
+          0:   '#ffffff',
+          50:  '#f8fafc',
+          100: '#f1f5f9',
+          200: '#e2e8f0',
+          300: '#cbd5e1',
+          400: '#94a3b8',
+          500: '#64748b',
+          600: '#475569',
+          700: '#334155',
+          800: '#1e293b',
+          900: '#0f172a',
+          950: '#020617',
+        },
+        success: { light: '#d1fae5', DEFAULT: '#10b981', dark: '#065f46' },
+        warning: { light: '#fef3c7', DEFAULT: '#f59e0b', dark: '#78350f' },
+        danger:  { light: '#fee2e2', DEFAULT: '#ef4444', dark: '#7f1d1d' },
+        info:    { light: '#dbeafe', DEFAULT: '#3b82f6', dark: '#1e3a5f' },
+      },
+      borderRadius: {
+        DEFAULT: '6px',
+        lg: '10px',
+        xl: '14px',
+        '2xl': '18px',
+      },
+      boxShadow: {
+        card: '0 1px 3px 0 rgb(0 0 0 / .08), 0 1px 2px -1px rgb(0 0 0 / .06)',
+        modal: '0 20px 60px -10px rgb(0 0 0 / .25)',
+        focus: '0 0 0 3px rgb(59 114 255 / .3)',
+      },
+      animation: {
+        'fade-in':    'fadeIn .2s ease-out',
+        'slide-up':   'slideUp .25s ease-out',
+        'slide-down': 'slideDown .2s ease-out',
+        'spin-slow':  'spin 1.5s linear infinite',
+        'pulse-ring': 'pulseRing 1.5s ease-out infinite',
+      },
+      keyframes: {
+        fadeIn:    { from: { opacity: '0' }, to: { opacity: '1' } },
+        slideUp:   { from: { opacity: '0', transform: 'translateY(8px)' }, to: { opacity: '1', transform: 'translateY(0)' } },
+        slideDown: { from: { opacity: '0', transform: 'translateY(-6px)' }, to: { opacity: '1', transform: 'translateY(0)' } },
+        pulseRing: { '0%': { transform: 'scale(.95)', boxShadow: '0 0 0 0 rgb(59 114 255/.5)' }, '70%': { transform: 'scale(1)', boxShadow: '0 0 0 10px rgb(59 114 255/0)' }, '100%': { transform: 'scale(.95)', boxShadow: '0 0 0 0 rgb(59 114 255/0)' } },
+      },
+    },
+  },
+  plugins: [],
+}

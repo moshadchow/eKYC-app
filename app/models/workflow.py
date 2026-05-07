@@ -1,8 +1,7 @@
 """
 Domain 4 — Workflow, Audit Trail & Lifecycle Management
-Tables: pre_check_logs, approval_queue, approval_decisions,
-        accounts, audit_logs, notifications,
-        kyc_refresh_schedules, kyc_refresh_events
+All enum fields use sa_column=sa.Column(sa.String) to prevent
+SQLAlchemy from generating Postgres native ENUM types.
 """
 
 import uuid
@@ -10,10 +9,11 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 
+import sqlalchemy as sa
 from sqlmodel import Field, SQLModel
 
-from .base import TimestampMixin, new_uuid, utcnow
-from .enums import (
+from app.models.base import TimestampMixin, new_uuid, utcnow
+from app.models.enums import (
     AccountStatus,
     AccountType,
     ActorType,
@@ -35,55 +35,29 @@ from .enums import (
 # ── pre_check_logs ────────────────────────────────────────────────────────────
 
 class PreCheckLogBase(SQLModel):
-    user_id: uuid.UUID = Field(
-        foreign_key="users.id",
-        index=True,
-        description="Customer who completed the pre-check questionnaire",
-    )
-    product_type: str = Field(
-        max_length=50,
-        description="Product type selected e.g. bo_account, life_insurance",
-    )
+    user_id: uuid.UUID = Field(foreign_key="users.id", index=True)
+    product_type: str = Field(max_length=50)
     investment_amount: Optional[Decimal] = Field(
         default=None,
-        decimal_places=2,
-        max_digits=18,
-        description="Expected investment/premium in BDT",
+        sa_column=sa.Column(sa.Numeric(18, 2), nullable=True),
     )
-
-    # Risk declarations
-    pep_declared: bool = Field(
-        default=False,
-        description="Did the customer self-declare as PEP?",
+    pep_declared: bool = Field(default=False)
+    ip_declared: bool = Field(default=False)
+    residency: str = Field(max_length=50)
+    decision: str = Field(
+        sa_column=sa.Column(sa.String(20), nullable=False),
     )
-    ip_declared: bool = Field(
-        default=False,
-        description="Did the customer self-declare as IP?",
-    )
-    residency: str = Field(
-        max_length=50,
-        description="resident_bangladeshi or non_resident_bangladeshi",
-    )
-
-    # Decision engine output
-    decision: PreCheckDecision = Field(
-        description="simplified | regular | rejected — output of decision engine",
-    )
-    decision_reason: Optional[str] = Field(
-        default=None,
-        max_length=500,
-        description="Human-readable explanation of the decision",
-    )
-
-    # Contextual metadata
+    decision_reason: Optional[str] = Field(default=None, max_length=500)
     ip_address: Optional[str] = Field(default=None, max_length=45)
 
 
 class PreCheckLog(PreCheckLogBase, table=True):
     __tablename__ = "pre_check_logs"
-
     id: uuid.UUID = Field(default_factory=new_uuid, primary_key=True)
-    created_at: datetime = Field(default_factory=utcnow, nullable=False)
+    created_at: datetime = Field(
+        default_factory=utcnow,
+        nullable=False,
+    )
 
     class Config:
         arbitrary_types_allowed = True
@@ -102,42 +76,38 @@ class PreCheckLogRead(PreCheckLogBase):
 
 class ApprovalQueueBase(SQLModel):
     kyc_application_id: uuid.UUID = Field(
-        foreign_key="kyc_applications.id",
-        unique=True,
-        index=True,
-        description="One queue entry per application",
+        foreign_key="kyc_applications.id", unique=True, index=True
     )
-    queue_type: QueueType = Field(
-        index=True,
-        description="standard | high_risk | failed_verification | edd_pending",
+    queue_type: str = Field(
+        sa_column=sa.Column(sa.String(30), nullable=False),
     )
-    priority: QueuePriority = Field(
+    priority: str = Field(
         default=QueuePriority.normal,
-        index=True,
+        sa_column=sa.Column(sa.String(10), nullable=False, server_default="normal"),
     )
-    assigned_maker_id: Optional[str] = Field(
-        default=None,
-        max_length=100,
-        description="Agent ID of the maker assigned to this application",
-    )
-    assigned_checker_id: Optional[str] = Field(
-        default=None,
-        max_length=100,
-        description="Agent ID of the checker — must differ from maker",
-    )
-    status: QueueStatus = Field(
+    assigned_maker_id: Optional[str] = Field(default=None, max_length=100)
+    assigned_checker_id: Optional[str] = Field(default=None, max_length=100)
+    status: str = Field(
         default=QueueStatus.unassigned,
-        index=True,
+        sa_column=sa.Column(sa.String(20), nullable=False, server_default="unassigned"),
     )
-    assigned_at: Optional[datetime] = Field(default=None)
-    completed_at: Optional[datetime] = Field(default=None)
+    assigned_at: Optional[datetime] = Field(
+        default=None,
+        nullable=True,
+    )
+    completed_at: Optional[datetime] = Field(
+        default=None,
+        nullable=True,
+    )
 
 
 class ApprovalQueue(ApprovalQueueBase, table=True):
     __tablename__ = "approval_queue"
-
     id: uuid.UUID = Field(default_factory=new_uuid, primary_key=True)
-    created_at: datetime = Field(default_factory=utcnow, nullable=False)
+    created_at: datetime = Field(
+        default_factory=utcnow,
+        nullable=False,
+    )
 
     class Config:
         arbitrary_types_allowed = True
@@ -155,46 +125,24 @@ class ApprovalQueueRead(ApprovalQueueBase):
 # ── approval_decisions ────────────────────────────────────────────────────────
 
 class ApprovalDecisionBase(SQLModel):
-    kyc_application_id: uuid.UUID = Field(
-        foreign_key="kyc_applications.id",
-        index=True,
+    kyc_application_id: uuid.UUID = Field(foreign_key="kyc_applications.id", index=True)
+    queue_entry_id: uuid.UUID = Field(foreign_key="approval_queue.id", index=True)
+    actor_id: str = Field(max_length=100)
+    actor_role: str = Field(max_length=50)
+    action: str = Field(
+        sa_column=sa.Column(sa.String(30), nullable=False),
     )
-    queue_entry_id: uuid.UUID = Field(
-        foreign_key="approval_queue.id",
-        index=True,
-    )
-
-    # Actor
-    actor_id: str = Field(
-        max_length=100,
-        description="Agent ID or system identifier who made the decision",
-    )
-    actor_role: str = Field(
-        max_length=50,
-        description="maker | checker | compliance_officer — role at time of decision",
-    )
-
-    # Decision
-    action: ApprovalAction = Field(
-        description="approve | reject | request_more_info | escalate | override_risk",
-    )
-    notes: Optional[str] = Field(
-        default=None,
-        max_length=2000,
-        description="Maker/checker notes visible to both",
-    )
-    rejection_reason: Optional[str] = Field(
-        default=None,
-        max_length=1000,
-        description="Mandatory when action = reject",
-    )
+    notes: Optional[str] = Field(default=None, sa_column=sa.Column(sa.Text, nullable=True))
+    rejection_reason: Optional[str] = Field(default=None, max_length=1000)
 
 
 class ApprovalDecision(ApprovalDecisionBase, table=True):
     __tablename__ = "approval_decisions"
-
     id: uuid.UUID = Field(default_factory=new_uuid, primary_key=True)
-    decided_at: datetime = Field(default_factory=utcnow, nullable=False)
+    decided_at: datetime = Field(
+        default_factory=utcnow,
+        nullable=False,
+    )
 
     class Config:
         arbitrary_types_allowed = True
@@ -211,58 +159,36 @@ class ApprovalDecisionRead(ApprovalDecisionBase):
 
 # ── accounts ──────────────────────────────────────────────────────────────────
 
-def _default_review_date() -> date:
-    """Placeholder — overwritten at activation based on risk tier."""
-    return (datetime.now(timezone.utc) + timedelta(days=365 * 5)).date()
-
-
 class AccountBase(SQLModel):
     kyc_application_id: uuid.UUID = Field(
-        foreign_key="kyc_applications.id",
-        unique=True,
-        index=True,
+        foreign_key="kyc_applications.id", unique=True, index=True
     )
-    user_id: uuid.UUID = Field(
-        foreign_key="users.id",
-        index=True,
+    user_id: uuid.UUID = Field(foreign_key="users.id", index=True)
+    account_number: str = Field(max_length=30, unique=True, index=True)
+    unique_account_number: str = Field(max_length=30, unique=True)
+    account_type: str = Field(
+        sa_column=sa.Column(sa.String(40), nullable=False),
     )
-    account_number: str = Field(
-        max_length=30,
-        unique=True,
-        index=True,
-        description="Institution-generated account/policy number",
-    )
-    unique_account_number: str = Field(
-        max_length=30,
-        unique=True,
-        description="CDBL or insurer unique account identifier",
-    )
-    account_type: AccountType = Field()
-    status: AccountStatus = Field(
+    status: str = Field(
         default=AccountStatus.active,
-        index=True,
+        sa_column=sa.Column(sa.String(30), nullable=False, server_default="active"),
     )
-
-    # KYC lifecycle
-    kyc_next_review_date: date = Field(
-        default_factory=_default_review_date,
-        description="Calculated at activation: high=+1yr, medium=+2yr, low=+5yr",
+    kyc_next_review_date: date = Field(sa_column=sa.Column(sa.Date, nullable=False))
+    risk_tier: str = Field(
+        sa_column=sa.Column(sa.String(10), nullable=False),
     )
-    risk_tier: RiskClassification = Field(
-        description="Current risk tier — may change on reassessment",
+    activated_at: Optional[datetime] = Field(
+        default=None,
+        nullable=True,
     )
-
-    # Timestamps
-    activated_at: Optional[datetime] = Field(default=None)
     closed_at: Optional[datetime] = Field(
         default=None,
-        description="Set on account closure — triggers 5-year retention clock",
+        nullable=True,
     )
 
 
 class Account(AccountBase, TimestampMixin, table=True):
     __tablename__ = "accounts"
-
     id: uuid.UUID = Field(default_factory=new_uuid, primary_key=True)
 
     class Config:
@@ -282,62 +208,31 @@ class AccountRead(AccountBase):
 # ── audit_logs ────────────────────────────────────────────────────────────────
 
 class AuditLog(SQLModel, table=True):
-    """
-    Immutable append-only audit trail.
-    Never update or delete rows in this table.
-    All application events are recorded here with actor + entity context.
-    """
+    """Immutable append-only audit trail — no FK constraints, never updated."""
     __tablename__ = "audit_logs"
 
     id: uuid.UUID = Field(default_factory=new_uuid, primary_key=True)
-
-    # Actor context
-    actor_id: Optional[str] = Field(
-        default=None,
-        max_length=100,
-        description="UUID string of user/agent, or 'system'",
-        index=True,
+    actor_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    actor_type: str = Field(
+        sa_column=sa.Column(sa.String(20), nullable=False),
     )
-    actor_type: ActorType = Field(
-        description="customer | agent | system",
-    )
-
-    # Subject entity
-    entity_id: Optional[str] = Field(
-        default=None,
-        max_length=100,
-        description="UUID string of the affected record",
-        index=True,
-    )
-    entity_type: str = Field(
-        max_length=100,
-        description="Table/model name e.g. 'kyc_applications', 'biometric_verifications'",
-        index=True,
-    )
-
-    # Event
-    action: AuditAction = Field(
-        index=True,
-        description="What happened",
+    entity_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    entity_type: str = Field(max_length=100, index=True)
+    action: str = Field(
+        sa_column=sa.Column(sa.String(40), nullable=False),
     )
     old_value_json: Optional[str] = Field(
-        default=None,
-        description="JSON snapshot of relevant fields before the change",
+        default=None, sa_column=sa.Column(sa.Text, nullable=True)
     )
     new_value_json: Optional[str] = Field(
-        default=None,
-        description="JSON snapshot of relevant fields after the change",
+        default=None, sa_column=sa.Column(sa.Text, nullable=True)
     )
-
-    # Request metadata
     ip_address: Optional[str] = Field(default=None, max_length=45)
     device_fingerprint: Optional[str] = Field(default=None, max_length=255)
     user_agent: Optional[str] = Field(default=None, max_length=512)
-
     created_at: datetime = Field(
         default_factory=utcnow,
-        nullable=False,
-        index=True,
+        nullable=False, index=True,
     )
 
     class Config:
@@ -347,10 +242,10 @@ class AuditLog(SQLModel, table=True):
 class AuditLogRead(SQLModel):
     id: uuid.UUID
     actor_id: Optional[str]
-    actor_type: ActorType
+    actor_type: str
     entity_id: Optional[str]
     entity_type: str
-    action: AuditAction
+    action: str
     old_value_json: Optional[str]
     new_value_json: Optional[str]
     ip_address: Optional[str]
@@ -360,51 +255,41 @@ class AuditLogRead(SQLModel):
 # ── notifications ─────────────────────────────────────────────────────────────
 
 class NotificationBase(SQLModel):
-    user_id: uuid.UUID = Field(
-        foreign_key="users.id",
-        index=True,
-    )
+    user_id: uuid.UUID = Field(foreign_key="users.id", index=True)
     kyc_application_id: Optional[uuid.UUID] = Field(
-        default=None,
-        foreign_key="kyc_applications.id",
-        index=True,
-        description="Linked application — null for generic account notifications",
+        default=None, foreign_key="kyc_applications.id", index=True
     )
-    channel: NotificationChannel = Field(description="sms | email | push")
-    notification_type: NotificationType = Field()
-    recipient_address: str = Field(
-        max_length=255,
-        description="Mobile number, email address, or FCM device token",
+    channel: str = Field(
+        sa_column=sa.Column(sa.String(10), nullable=False),
     )
-    message_body: str = Field(
-        max_length=2000,
-        description="Rendered message content — no secrets or PII beyond identifier",
+    notification_type: str = Field(
+        sa_column=sa.Column(sa.String(40), nullable=False),
     )
-    status: NotificationStatus = Field(
+    recipient_address: str = Field(max_length=255)
+    message_body: str = Field(sa_column=sa.Column(sa.Text, nullable=False))
+    status: str = Field(
         default=NotificationStatus.pending,
-        index=True,
+        sa_column=sa.Column(sa.String(15), nullable=False, server_default="pending"),
     )
-    retry_count: int = Field(
-        default=0,
-        description="Number of delivery retries attempted",
-    )
-    gateway_message_id: Optional[str] = Field(
+    retry_count: int = Field(default=0)
+    gateway_message_id: Optional[str] = Field(default=None, max_length=255)
+    sent_at: Optional[datetime] = Field(
         default=None,
-        max_length=255,
-        description="Message ID returned by SMS/email gateway for delivery tracking",
+        nullable=True,
     )
-    sent_at: Optional[datetime] = Field(default=None)
     delivered_at: Optional[datetime] = Field(
         default=None,
-        description="Set when delivery receipt received from gateway",
+        nullable=True,
     )
 
 
 class Notification(NotificationBase, table=True):
     __tablename__ = "notifications"
-
     id: uuid.UUID = Field(default_factory=new_uuid, primary_key=True)
-    created_at: datetime = Field(default_factory=utcnow, nullable=False)
+    created_at: datetime = Field(
+        default_factory=utcnow,
+        nullable=False,
+    )
 
     class Config:
         arbitrary_types_allowed = True
@@ -422,44 +307,34 @@ class NotificationRead(NotificationBase):
 # ── kyc_refresh_schedules ─────────────────────────────────────────────────────
 
 class KYCRefreshScheduleBase(SQLModel):
-    account_id: uuid.UUID = Field(
-        foreign_key="accounts.id",
-        unique=True,
-        index=True,
-        description="One active schedule per account",
+    account_id: uuid.UUID = Field(foreign_key="accounts.id", unique=True, index=True)
+    user_id: uuid.UUID = Field(foreign_key="users.id", index=True)
+    risk_tier: str = Field(
+        sa_column=sa.Column(sa.String(10), nullable=False),
     )
-    user_id: uuid.UUID = Field(
-        foreign_key="users.id",
-        index=True,
-    )
-    risk_tier: RiskClassification = Field(
-        description="Risk tier at time of schedule creation — drives due_date",
-    )
-    due_date: date = Field(
-        index=True,
-        description="Date by which KYC must be refreshed. "
-                    "high=+1yr, medium=+2yr, low=+5yr from activation or last review",
-    )
-    status: RefreshStatus = Field(
+    due_date: date = Field(sa_column=sa.Column(sa.Date, nullable=False, index=True))
+    status: str = Field(
         default=RefreshStatus.scheduled,
-        index=True,
+        sa_column=sa.Column(sa.String(20), nullable=False, server_default="scheduled"),
     )
-    reminder_count: int = Field(
-        default=0,
-        description="Number of reminder notifications sent",
+    reminder_count: int = Field(default=0)
+    last_reminder_at: Optional[datetime] = Field(
+        default=None,
+        nullable=True,
     )
-    last_reminder_at: Optional[datetime] = Field(default=None)
     completed_at: Optional[datetime] = Field(
         default=None,
-        description="Set when refresh is accepted and new review date is calculated",
+        nullable=True,
     )
 
 
 class KYCRefreshSchedule(KYCRefreshScheduleBase, table=True):
     __tablename__ = "kyc_refresh_schedules"
-
     id: uuid.UUID = Field(default_factory=new_uuid, primary_key=True)
-    created_at: datetime = Field(default_factory=utcnow, nullable=False)
+    created_at: datetime = Field(
+        default_factory=utcnow,
+        nullable=False,
+    )
 
     class Config:
         arbitrary_types_allowed = True
@@ -477,28 +352,23 @@ class KYCRefreshScheduleRead(KYCRefreshScheduleBase):
 # ── kyc_refresh_events ────────────────────────────────────────────────────────
 
 class KYCRefreshEventBase(SQLModel):
-    schedule_id: uuid.UUID = Field(
-        foreign_key="kyc_refresh_schedules.id",
-        index=True,
-    )
+    schedule_id: uuid.UUID = Field(foreign_key="kyc_refresh_schedules.id", index=True)
     kyc_application_id: Optional[uuid.UUID] = Field(
-        default=None,
-        foreign_key="kyc_applications.id",
-        description="Linked to the new application opened during refresh",
+        default=None, foreign_key="kyc_applications.id"
     )
-    event_type: RefreshEventType = Field()
-    notes: Optional[str] = Field(
-        default=None,
-        max_length=1000,
-        description="e.g. 'Customer self-declaration received — no changes'",
+    event_type: str = Field(
+        sa_column=sa.Column(sa.String(30), nullable=False),
     )
+    notes: Optional[str] = Field(default=None, max_length=1000)
 
 
 class KYCRefreshEvent(KYCRefreshEventBase, table=True):
     __tablename__ = "kyc_refresh_events"
-
     id: uuid.UUID = Field(default_factory=new_uuid, primary_key=True)
-    created_at: datetime = Field(default_factory=utcnow, nullable=False)
+    created_at: datetime = Field(
+        default_factory=utcnow,
+        nullable=False,
+    )
 
     class Config:
         arbitrary_types_allowed = True

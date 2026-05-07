@@ -1,46 +1,23 @@
 """
-Phase 1 — Customer Authentication
-POST /auth/customer/send-otp
-POST /auth/customer/verify-otp
-POST /auth/customer/refresh
-POST /auth/customer/logout
+Phase 1 — Customer Authentication (thin API layer)
+All DB operations delegated to crud_auth_customer.
 """
 
-import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlmodel import select
 
-from ...core.config import settings
-from ...core.deps import CurrentUser, DBSession
-from ...core.security import (
-    create_access_token,
-    create_refresh_token,
-    generate_otp,
-    hash_otp,
-    hash_token,
-    verify_otp,
-)
-from ...models.base import utcnow
-from ...models.enums import ActorType, AuditAction, OTPPurpose, UserStatus
-from ...models.identity import OTPLog, Session, User
-from ...schemas.common import APIResponse, MessageResponse, TokenResponse
-from ...services.audit import record_event
+from app.core.config import settings
+from app.core.deps import CurrentUser, DBSession
+from app.crud.crud_auth_customer import crud_auth_customer
+from app.models.enums import ActorType, AuditAction, OTPPurpose
+from app.schemas.common import APIResponse, MessageResponse, TokenResponse
+from app.services.audit import record_event
 
 router = APIRouter(prefix="/auth/customer", tags=["Customer Auth"])
 
 
-# ── Request / Response schemas ────────────────────────────────────────────────
-
 class SendOTPRequest(BaseModel):
-    mobile_number: str = Field(
-        ..., min_length=11, max_length=15,
-        example="+8801712345678",
-        description="BD mobile number in E.164 format",
-    )
+    mobile_number: str = Field(..., min_length=11, max_length=15, example="+8801712345678")
     email: str | None = Field(None, example="user@example.com")
 
 
@@ -50,67 +27,16 @@ class VerifyOTPRequest(BaseModel):
     device_fingerprint: str | None = None
 
 
-class RefreshRequest(BaseModel):
-    refresh_token: str
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-async def _get_or_create_user(db: DBSession, mobile: str, email: str | None) -> User:
-    result = await db.execute(select(User).where(User.mobile_number == mobile))
-    user = result.scalar_one_or_none()
-    if not user:
-        user = User(mobile_number=mobile, email=email)
-        db.add(user)
-        await db.flush()
-    elif email and not user.email:
-        user.email = email
-    return user
-
-
-async def _check_lockout(db: DBSession, user_id: uuid.UUID) -> None:
-    """Raise 429 if user has too many recent failed OTP attempts."""
-    window = utcnow() - timedelta(minutes=settings.OTP_LOCKOUT_MINUTES)
-    result = await db.execute(
-        select(OTPLog).where(
-            OTPLog.user_id == user_id,
-            OTPLog.purpose == OTPPurpose.customer_login,
-            OTPLog.is_verified == False,
-            OTPLog.attempt_count >= settings.OTP_MAX_ATTEMPTS,
-            OTPLog.created_at >= window,
-        )
-    )
-    if result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Too many failed attempts. Try again after {settings.OTP_LOCKOUT_MINUTES} minutes.",
-        )
-
-
-# ── Endpoints ─────────────────────────────────────────────────────────────────
-
 @router.post("/send-otp", response_model=APIResponse[dict])
 async def send_otp(body: SendOTPRequest, request: Request, db: DBSession):
-    """
-    Generate and send OTP to customer mobile.
-    Creates a new user record if first time.
-    """
-    user = await _get_or_create_user(db, body.mobile_number, body.email)
+    """Generate OTP and send to customer mobile. Creates user if first time."""
+    user = await crud_auth_customer.get_or_create_user(db, body.mobile_number, body.email)
+    crud_auth_customer.assert_user_not_locked(user)
+    await crud_auth_customer.check_otp_lockout(db, user.id)
 
-    if user.status == UserStatus.locked:
-        raise HTTPException(status_code=403, detail="Account is locked")
-
-    await _check_lockout(db, user.id)
-
-    otp = generate_otp()
-    otp_log = OTPLog(
-        user_id=user.id,
-        otp_hash=hash_otp(otp),
-        purpose=OTPPurpose.customer_login,
-        expires_at=utcnow() + timedelta(minutes=settings.OTP_EXPIRE_MINUTES),
+    otp_log, otp_plain = await crud_auth_customer.create_otp(
+        db, user.id, OTPPurpose.customer_login
     )
-    db.add(otp_log)
-
     await record_event(
         db,
         actor_id=str(user.id),
@@ -121,12 +47,10 @@ async def send_otp(body: SendOTPRequest, request: Request, db: DBSession):
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
-
-    # TODO: Integrate SMS gateway here. In dev, OTP is returned in response.
     return APIResponse(
         message="OTP sent successfully",
         data={
-            "otp": otp,  # Remove in production — for dev/testing only
+            "otp": otp_plain,          # Remove in production
             "expires_in_seconds": settings.OTP_EXPIRE_MINUTES * 60,
             "mobile_number": body.mobile_number,
         },
@@ -134,39 +58,24 @@ async def send_otp(body: SendOTPRequest, request: Request, db: DBSession):
 
 
 @router.post("/verify-otp", response_model=APIResponse[TokenResponse])
-async def verify_otp_endpoint(body: VerifyOTPRequest, request: Request, db: DBSession):
-    """
-    Verify OTP and issue JWT access + refresh tokens.
-    Creates a session record capturing device and IP.
-    """
-    result = await db.execute(select(User).where(User.mobile_number == body.mobile_number))
-    user = result.scalar_one_or_none()
+async def verify_otp(body: VerifyOTPRequest, request: Request, db: DBSession):
+    """Verify OTP and issue JWT access + refresh tokens."""
+    user = await crud_auth_customer.get_user_by_mobile(db, body.mobile_number)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Get latest unverified OTP
-    otp_result = await db.execute(
-        select(OTPLog).where(
-            OTPLog.user_id == user.id,
-            OTPLog.purpose == OTPPurpose.customer_login,
-            OTPLog.is_verified == False,
-            OTPLog.expires_at > utcnow(),
-        ).order_by(OTPLog.created_at.desc()).limit(1)
+    otp_log = await crud_auth_customer.get_active_otp(
+        db, user.id, OTPPurpose.customer_login
     )
-    otp_log = otp_result.scalar_one_or_none()
-
     if not otp_log:
-        raise HTTPException(status_code=400, detail="No active OTP found. Please request a new OTP.")
-
-    otp_log.attempt_count += 1
-
-    if otp_log.attempt_count > settings.OTP_MAX_ATTEMPTS:
         raise HTTPException(
-            status_code=429,
-            detail=f"Maximum OTP attempts reached. Request a new OTP.",
+            status_code=400,
+            detail="No active OTP found. Please request a new OTP.",
         )
 
-    if not verify_otp(body.otp, otp_log.otp_hash):
+    crud_auth_customer.increment_otp_attempt(otp_log)
+
+    if not crud_auth_customer.verify_otp_value(body.otp, otp_log):
         await record_event(
             db,
             actor_id=str(user.id),
@@ -178,21 +87,12 @@ async def verify_otp_endpoint(body: VerifyOTPRequest, request: Request, db: DBSe
         )
         raise HTTPException(status_code=400, detail="Invalid OTP")
 
-    otp_log.is_verified = True
+    crud_auth_customer.mark_otp_verified(otp_log)
 
-    access_token = create_access_token(str(user.id), "customer")
-    refresh_token = create_refresh_token(str(user.id), "customer")
-
-    session = Session(
-        user_id=user.id,
-        jwt_token_hash=hash_token(access_token),
-        ip_address=request.client.host if request.client else "unknown",
-        device_fingerprint=body.device_fingerprint,
-        user_agent=request.headers.get("user-agent"),
-        expires_at=utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+    ip = request.client.host if request.client else "unknown"
+    session, access_token, refresh_token = await crud_auth_customer.create_customer_session(
+        db, user.id, ip, body.device_fingerprint, request.headers.get("user-agent")
     )
-    db.add(session)
-
     await record_event(
         db,
         actor_id=str(user.id),
@@ -200,9 +100,8 @@ async def verify_otp_endpoint(body: VerifyOTPRequest, request: Request, db: DBSe
         action=AuditAction.login,
         entity_type="sessions",
         entity_id=str(session.id),
-        ip_address=request.client.host if request.client else None,
+        ip_address=ip,
     )
-
     return APIResponse(
         message="Authentication successful",
         data=TokenResponse(
@@ -215,22 +114,9 @@ async def verify_otp_endpoint(body: VerifyOTPRequest, request: Request, db: DBSe
 
 @router.post("/logout", response_model=MessageResponse)
 async def logout(request: Request, current_user: CurrentUser, db: DBSession):
-    """Invalidate current session."""
-    auth_header = request.headers.get("authorization", "")
-    token = auth_header.replace("Bearer ", "")
-    token_hash = hash_token(token)
-
-    result = await db.execute(
-        select(Session).where(
-            Session.user_id == current_user.id,
-            Session.jwt_token_hash == token_hash,
-            Session.is_active == True,
-        )
-    )
-    session = result.scalar_one_or_none()
-    if session:
-        session.is_active = False
-
+    """Invalidate current session token."""
+    token = request.headers.get("authorization", "").replace("Bearer ", "")
+    await crud_auth_customer.invalidate_session(db, current_user.id, token)
     await record_event(
         db,
         actor_id=str(current_user.id),

@@ -1,8 +1,6 @@
 from enum import Enum
 
 
-# ── Auth / Session ────────────────────────────────────────────────────────────
-
 class UserStatus(str, Enum):
     active = "active"
     suspended = "suspended"
@@ -23,8 +21,6 @@ class AgentRole(str, Enum):
     system_admin = "system_admin"
     system_auditor = "system_auditor"
 
-
-# ── Onboarding / KYC ─────────────────────────────────────────────────────────
 
 class KYCType(str, Enum):
     simplified = "simplified"
@@ -120,8 +116,6 @@ class NomineeRelation(str, Enum):
     other = "other"
 
 
-# ── Compliance / Risk ─────────────────────────────────────────────────────────
-
 class ScreenType(str, Enum):
     un_sanctions = "un_sanctions"
     internal_blacklist = "internal_blacklist"
@@ -164,8 +158,6 @@ class CDDStatus(str, Enum):
     completed = "completed"
     not_required = "not_required"
 
-
-# ── Approval / Workflow ───────────────────────────────────────────────────────
 
 class QueueType(str, Enum):
     standard = "standard"
@@ -215,8 +207,6 @@ class AccountType(str, Enum):
     non_life_insurance_policy = "non_life_insurance_policy"
 
 
-# ── Notifications ─────────────────────────────────────────────────────────────
-
 class NotificationChannel(str, Enum):
     sms = "sms"
     email = "email"
@@ -241,8 +231,6 @@ class NotificationStatus(str, Enum):
     failed = "failed"
 
 
-# ── Audit ─────────────────────────────────────────────────────────────────────
-
 class AuditAction(str, Enum):
     create = "create"
     update = "update"
@@ -262,8 +250,6 @@ class AuditAction(str, Enum):
     account_activated = "account_activated"
     kyc_refresh_completed = "kyc_refresh_completed"
 
-
-# ── KYC Lifecycle ─────────────────────────────────────────────────────────────
 
 class RefreshStatus(str, Enum):
     scheduled = "scheduled"

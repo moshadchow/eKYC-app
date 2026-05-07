@@ -1,50 +1,20 @@
-"""
-Phase 3 & 4 — Self & Assisted Onboarding
-POST   /kyc/applications
-GET    /kyc/applications/{app_id}
-PUT    /kyc/applications/{app_id}/profile
-POST   /kyc/applications/{app_id}/nominees
-POST   /kyc/applications/{app_id}/signature
-POST   /kyc/applications/{app_id}/submit
-GET    /kyc/applications                    (agent - list queue)
-PUT    /kyc/applications/{app_id}/status    (agent)
-"""
-
+"""Phase 3 & 4 — KYC Applications (API layer only)"""
 import uuid
 from datetime import date
 from decimal import Decimal
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
-from sqlmodel import select
 
-from ...core.config import settings
-from ...core.deps import CurrentAgent, CurrentUser, DBSession
-from ...core.security import generate_application_ref
-from ...models.base import utcnow
-from ...models.enums import (
-    ActorType,
-    ApplicationStatus,
-    AuditAction,
-    Gender,
-    KYCType,
-    NomineeRelation,
-    OnboardingChannel,
-    ProductType,
-    ResidencyStatus,
-    SignatureType,
-    SourceOfFund,
+from app.core.deps import CurrentAgent, CurrentUser, DBSession
+from app.crud.crud_application import crud_application
+from app.models.enums import (
+    ActorType, ApplicationStatus, AuditAction, Gender, KYCType,
+    NomineeRelation, OnboardingChannel, ProductType, ResidencyStatus,
+    SignatureType, SourceOfFund,
 )
-from ...models.identity import User
-from ...models.onboarding import (
-    CustomerProfile,
-    DigitalSignature,
-    KYCApplication,
-    Nominee,
-)
-from ...schemas.common import APIResponse, MessageResponse, PaginatedResponse
-from ...services.audit import record_event
+from app.schemas.common import APIResponse, PaginatedResponse
+from app.services.audit import record_event
 
 router = APIRouter(prefix="/kyc", tags=["KYC Applications"])
 
@@ -60,7 +30,6 @@ class CreateApplicationRequest(BaseModel):
 
 
 class CustomerProfileRequest(BaseModel):
-    # Identity (English - from OCR, agent may correct name spelling only)
     full_name_en: str = Field(..., max_length=255)
     full_name_bn: str | None = None
     fathers_name_en: str | None = None
@@ -68,27 +37,18 @@ class CustomerProfileRequest(BaseModel):
     mothers_name_en: str | None = None
     mothers_name_bn: str | None = None
     spouse_name_en: str | None = None
-    # NID and DOB are non-editable — captured from biometric verification
     gender: Gender | None = None
     tin_number: str | None = None
-
-    # Financial
     profession: str | None = None
     monthly_income: Decimal | None = None
     source_of_fund: SourceOfFund | None = None
     source_of_fund_detail: str | None = None
-
-    # Contact
     mobile_number: str = Field(..., max_length=15)
     email: str | None = None
-
-    # Address
     present_address: str | None = None
     permanent_address: str | None = None
     nationality: str = "Bangladeshi"
     residency_status: ResidencyStatus = ResidencyStatus.resident_bangladeshi
-
-    # Risk declarations
     is_pep: bool = False
     is_ip: bool = False
     is_nrb: bool = False
@@ -109,51 +69,28 @@ class NomineeRequest(BaseModel):
 
 class SignatureRequest(BaseModel):
     signature_type: SignatureType
-    storage_key: str | None = Field(
-        None, description="Object storage key for wet/electronic signature image"
-    )
-    pin: str | None = Field(
-        None, min_length=4, max_length=6, description="PIN — only for low-risk accounts"
-    )
+    storage_key: str | None = Field(None, description="For wet/electronic signatures")
+    pin: str | None = Field(None, min_length=4, max_length=6, description="Simplified eKYC only")
 
 
 class ApplicationRead(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     agent_id: uuid.UUID | None
-    kyc_type: KYCType
-    onboarding_channel: OnboardingChannel
-    product_type: ProductType
-    status: ApplicationStatus
+    kyc_type: str
+    onboarding_channel: str
+    product_type: str
+    status: str
     application_ref: str | None
     submitted_at: str | None
     created_at: str
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-async def _get_application_or_404(
-    db: DBSession, app_id: uuid.UUID, user_id: uuid.UUID | None = None
-) -> KYCApplication:
-    query = select(KYCApplication).where(KYCApplication.id == app_id)
-    if user_id:
-        query = query.where(KYCApplication.user_id == user_id)
-    result = await db.execute(query)
-    app = result.scalar_one_or_none()
-    if not app:
-        raise HTTPException(status_code=404, detail="Application not found")
-    return app
-
-
-def _app_to_read(app: KYCApplication) -> ApplicationRead:
+def _to_read(app) -> ApplicationRead:
     return ApplicationRead(
-        id=app.id,
-        user_id=app.user_id,
-        agent_id=app.agent_id,
-        kyc_type=app.kyc_type,
-        onboarding_channel=app.onboarding_channel,
-        product_type=app.product_type,
-        status=app.status,
+        id=app.id, user_id=app.user_id, agent_id=app.agent_id,
+        kyc_type=app.kyc_type, onboarding_channel=app.onboarding_channel,
+        product_type=app.product_type, status=app.status,
         application_ref=app.application_ref,
         submitted_at=str(app.submitted_at) if app.submitted_at else None,
         created_at=str(app.created_at),
@@ -164,313 +101,129 @@ def _app_to_read(app: KYCApplication) -> ApplicationRead:
 
 @router.post("/applications", response_model=APIResponse[ApplicationRead])
 async def create_application(
-    body: CreateApplicationRequest,
-    request: Request,
-    current_user: CurrentUser,
-    db: DBSession,
+    body: CreateApplicationRequest, request: Request,
+    current_user: CurrentUser, db: DBSession,
 ):
-    """
-    Phase 3/4 Step 1: Create a new KYC application (draft state).
-    Called after pre-check decision is made.
-    """
-    app = KYCApplication(
-        user_id=current_user.id,
-        kyc_type=body.kyc_type,
-        onboarding_channel=body.onboarding_channel,
-        product_type=body.product_type,
-        product_code=body.product_code,
-        expected_investment=body.expected_investment,
-        status=ApplicationStatus.draft,
-        application_ref=generate_application_ref(),
+    """Phase 3 Step 1: Create draft KYC application after pre-check."""
+    app = await crud_application.create(
+        db, current_user.id, body.kyc_type, body.onboarding_channel,
+        body.product_type, body.product_code, body.expected_investment,
     )
-    db.add(app)
-    await db.flush()
-
     await record_event(
-        db,
-        actor_id=str(current_user.id),
-        actor_type=ActorType.customer,
-        action=AuditAction.create,
-        entity_type="kyc_applications",
-        entity_id=str(app.id),
-        new_value={"kyc_type": body.kyc_type, "product_type": body.product_type},
+        db, actor_id=str(current_user.id), actor_type=ActorType.customer,
+        action=AuditAction.create, entity_type="kyc_applications", entity_id=str(app.id),
+        new_value={"kyc_type": body.kyc_type.value, "product_type": body.product_type.value},
         ip_address=request.client.host if request.client else None,
     )
-
-    return APIResponse(message="Application created", data=_app_to_read(app))
+    return APIResponse(message="Application created", data=_to_read(app))
 
 
 @router.get("/applications/{app_id}", response_model=APIResponse[ApplicationRead])
 async def get_application(
-    app_id: uuid.UUID,
-    current_user: CurrentUser,
-    db: DBSession,
+    app_id: uuid.UUID, current_user: CurrentUser, db: DBSession,
 ):
-    app = await _get_application_or_404(db, app_id, current_user.id)
-    return APIResponse(data=_app_to_read(app))
+    app = await crud_application.get_by_id(db, app_id, current_user.id)
+    return APIResponse(data=_to_read(app))
 
 
 @router.put("/applications/{app_id}/profile", response_model=APIResponse[dict])
 async def save_customer_profile(
-    app_id: uuid.UUID,
-    body: CustomerProfileRequest,
-    request: Request,
-    current_user: CurrentUser,
-    db: DBSession,
+    app_id: uuid.UUID, body: CustomerProfileRequest, request: Request,
+    current_user: CurrentUser, db: DBSession,
 ):
-    """
-    Phase 3 Step 3–4: Save customer personal information.
-    NID and DOB are populated from biometric verification — not accepted here.
-    """
-    app = await _get_application_or_404(db, app_id, current_user.id)
-
-    if app.status not in (ApplicationStatus.draft,):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot update profile in status: {app.status}",
-        )
-
-    # Check if profile already exists
-    existing = await db.execute(
-        select(CustomerProfile).where(CustomerProfile.kyc_application_id == app_id)
+    """Phase 3 Step 3–4: Save customer personal information."""
+    app = await crud_application.get_by_id(db, app_id, current_user.id)
+    profile = await crud_application.upsert_profile(
+        db, app_id, current_user.id, app.status,
+        body.model_dump(exclude_none=True),
     )
-    profile = existing.scalar_one_or_none()
-
-    if profile:
-        for key, val in body.model_dump(exclude_none=True).items():
-            setattr(profile, key, val)
-    else:
-        # Fetch NID and DOB from biometric verification record
-        from ...models.onboarding import BiometricVerification
-        bio_result = await db.execute(
-            select(BiometricVerification).where(
-                BiometricVerification.kyc_application_id == app_id,
-                BiometricVerification.is_matched == True,
-            ).order_by(BiometricVerification.verified_at.desc()).limit(1)
-        )
-        bio = bio_result.scalar_one_or_none()
-
-        profile = CustomerProfile(
-            kyc_application_id=app_id,
-            user_id=current_user.id,
-            nid_number=bio.nid_number if bio else "PENDING",
-            date_of_birth=bio.dob_provided if bio else date.today(),
-            **body.model_dump(exclude_none=True),
-        )
-        db.add(profile)
-        await db.flush()
-
     await record_event(
-        db,
-        actor_id=str(current_user.id),
-        actor_type=ActorType.customer,
-        action=AuditAction.update,
-        entity_type="customer_profiles",
-        entity_id=str(profile.id),
+        db, actor_id=str(current_user.id), actor_type=ActorType.customer,
+        action=AuditAction.update, entity_type="customer_profiles", entity_id=str(profile.id),
         ip_address=request.client.host if request.client else None,
     )
-
     return APIResponse(message="Profile saved", data={"profile_id": str(profile.id)})
 
 
 @router.post("/applications/{app_id}/nominees", response_model=APIResponse[dict])
 async def add_nominee(
-    app_id: uuid.UUID,
-    body: NomineeRequest,
-    request: Request,
-    current_user: CurrentUser,
-    db: DBSession,
+    app_id: uuid.UUID, body: NomineeRequest, request: Request,
+    current_user: CurrentUser, db: DBSession,
 ):
     """Phase 3 Step 4: Add nominee to application."""
-    app = await _get_application_or_404(db, app_id, current_user.id)
-
-    if body.is_minor and not body.guardian_name:
-        raise HTTPException(
-            status_code=422,
-            detail="Guardian name is required when nominee is a minor",
-        )
-
-    nominee = Nominee(
-        kyc_application_id=app_id,
-        **body.model_dump(exclude_none=True),
+    await crud_application.get_by_id(db, app_id, current_user.id)
+    nominee = await crud_application.add_nominee(
+        db, app_id, body.full_name, body.relation, body.date_of_birth,
+        body.contact_number, body.address, body.photo_storage_key,
+        body.is_minor, body.guardian_name, body.guardian_nid, body.guardian_address,
     )
-    db.add(nominee)
-    await db.flush()
-
     return APIResponse(message="Nominee added", data={"nominee_id": str(nominee.id)})
 
 
 @router.post("/applications/{app_id}/signature", response_model=APIResponse[dict])
 async def capture_signature(
-    app_id: uuid.UUID,
-    body: SignatureRequest,
-    request: Request,
-    current_user: CurrentUser,
-    db: DBSession,
+    app_id: uuid.UUID, body: SignatureRequest, request: Request,
+    current_user: CurrentUser, db: DBSession,
 ):
-    """
-    Phase 3 Step 5: Record customer signature or PIN consent.
-    PIN only permitted for simplified/low-risk accounts.
-    """
-    app = await _get_application_or_404(db, app_id, current_user.id)
-
-    if body.signature_type == SignatureType.pin:
-        if app.kyc_type != KYCType.simplified:
-            raise HTTPException(
-                status_code=400,
-                detail="PIN signature only permitted for simplified eKYC accounts",
-            )
-        if not body.pin:
-            raise HTTPException(status_code=422, detail="PIN is required for PIN signature type")
-
-    if body.signature_type in (SignatureType.wet, SignatureType.electronic):
-        if not body.storage_key:
-            raise HTTPException(status_code=422, detail="storage_key required for wet/electronic signature")
-
-    from ...core.security import hash_password
-    sig = DigitalSignature(
-        kyc_application_id=app_id,
-        signature_type=body.signature_type,
-        storage_key=body.storage_key,
-        pin_hash=hash_password(body.pin) if body.pin else None,
-        is_low_risk_pin=body.signature_type == SignatureType.pin,
+    """Phase 3 Step 5: Capture signature or PIN consent."""
+    app = await crud_application.get_by_id(db, app_id, current_user.id)
+    sig = await crud_application.capture_signature(
+        db, app, body.signature_type, body.storage_key, body.pin,
     )
-    db.add(sig)
-    await db.flush()
-
     return APIResponse(message="Signature captured", data={"signature_id": str(sig.id)})
 
 
 @router.post("/applications/{app_id}/submit", response_model=APIResponse[ApplicationRead])
 async def submit_application(
-    app_id: uuid.UUID,
-    request: Request,
-    current_user: CurrentUser,
-    db: DBSession,
+    app_id: uuid.UUID, request: Request, current_user: CurrentUser, db: DBSession,
 ):
-    """
-    Phase 3 Step 6: Validate all required fields and submit application.
-    Moves status from draft → submitted.
-    """
-    app = await _get_application_or_404(db, app_id, current_user.id)
-
-    if app.status != ApplicationStatus.draft:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Only draft applications can be submitted. Current status: {app.status}",
-        )
-
-    # Validate profile exists
-    profile_result = await db.execute(
-        select(CustomerProfile).where(CustomerProfile.kyc_application_id == app_id)
-    )
-    if not profile_result.scalar_one_or_none():
-        raise HTTPException(status_code=422, detail="Customer profile not found. Complete profile before submitting.")
-
-    # Validate biometric verification passed
-    from ...models.onboarding import BiometricVerification
-    bio_result = await db.execute(
-        select(BiometricVerification).where(
-            BiometricVerification.kyc_application_id == app_id,
-            BiometricVerification.is_matched == True,
-        )
-    )
-    if not bio_result.scalar_one_or_none():
-        raise HTTPException(status_code=422, detail="Biometric verification required before submission.")
-
-    # Validate signature captured
-    sig_result = await db.execute(
-        select(DigitalSignature).where(DigitalSignature.kyc_application_id == app_id)
-    )
-    if not sig_result.scalar_one_or_none():
-        raise HTTPException(status_code=422, detail="Signature or consent required before submission.")
-
-    app.status = ApplicationStatus.submitted
-    app.submitted_at = utcnow()
-
+    """Phase 3 Step 6: Validate and submit — moves draft → submitted."""
+    app = await crud_application.get_by_id(db, app_id, current_user.id)
+    app = await crud_application.submit(db, app)
     await record_event(
-        db,
-        actor_id=str(current_user.id),
-        actor_type=ActorType.customer,
-        action=AuditAction.update,
-        entity_type="kyc_applications",
-        entity_id=str(app.id),
+        db, actor_id=str(current_user.id), actor_type=ActorType.customer,
+        action=AuditAction.update, entity_type="kyc_applications", entity_id=str(app.id),
         new_value={"status": "submitted"},
         ip_address=request.client.host if request.client else None,
     )
-
-    return APIResponse(message="Application submitted successfully", data=_app_to_read(app))
+    return APIResponse(message="Application submitted successfully", data=_to_read(app))
 
 
 # ── Agent endpoints ───────────────────────────────────────────────────────────
 
 @router.post("/applications/agent/create", response_model=APIResponse[ApplicationRead])
 async def agent_create_application(
-    body: CreateApplicationRequest,
-    customer_mobile: str,
-    request: Request,
-    current_agent: CurrentAgent,
-    db: DBSession,
+    body: CreateApplicationRequest, customer_mobile: str, request: Request,
+    current_agent: CurrentAgent, db: DBSession,
 ):
-    """
-    Phase 4: Agent initiates a new application on behalf of a customer.
-    Customer must already have verified their mobile (OTP).
-    """
-    user_result = await db.execute(
-        select(User).where(User.mobile_number == customer_mobile)
-    )
-    user = user_result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="Customer not found. Customer must verify mobile first.")
-
-    app = KYCApplication(
-        user_id=user.id,
+    """Phase 4: Agent initiates application on behalf of a customer."""
+    user = await crud_application.get_customer_by_mobile(db, customer_mobile)
+    app = await crud_application.create(
+        db, user.id, body.kyc_type, body.onboarding_channel,
+        body.product_type, body.product_code, body.expected_investment,
         agent_id=current_agent.id,
-        kyc_type=body.kyc_type,
-        onboarding_channel=body.onboarding_channel,
-        product_type=body.product_type,
-        product_code=body.product_code,
-        expected_investment=body.expected_investment,
-        status=ApplicationStatus.draft,
-        application_ref=generate_application_ref(),
     )
-    db.add(app)
-    await db.flush()
-
     await record_event(
-        db,
-        actor_id=str(current_agent.id),
-        actor_type=ActorType.agent,
-        action=AuditAction.create,
-        entity_type="kyc_applications",
-        entity_id=str(app.id),
+        db, actor_id=str(current_agent.id), actor_type=ActorType.agent,
+        action=AuditAction.create, entity_type="kyc_applications", entity_id=str(app.id),
         new_value={"agent_id": str(current_agent.id), "customer_id": str(user.id)},
         ip_address=request.client.host if request.client else None,
     )
-
-    return APIResponse(message="Application created by agent", data=_app_to_read(app))
+    return APIResponse(message="Application created by agent", data=_to_read(app))
 
 
 @router.get("/applications", response_model=PaginatedResponse[ApplicationRead])
 async def list_applications_agent(
-    current_agent: CurrentAgent,
-    db: DBSession,
+    current_agent: CurrentAgent, db: DBSession,
     status_filter: ApplicationStatus | None = None,
-    page: int = 1,
-    page_size: int = 20,
+    page: int = 1, page_size: int = 20,
 ):
     """Phase 4: Agent dashboard — list applications assigned to this agent."""
-    query = select(KYCApplication).where(KYCApplication.agent_id == current_agent.id)
-    if status_filter:
-        query = query.where(KYCApplication.status == status_filter)
-
-    query = query.offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
-    apps = result.scalars().all()
-
+    apps = await crud_application.list_by_agent(
+        db, current_agent.id, status_filter,
+        offset=(page - 1) * page_size, limit=page_size,
+    )
     return PaginatedResponse(
-        total=len(apps),
-        page=page,
-        page_size=page_size,
-        data=[_app_to_read(a) for a in apps],
+        total=len(apps), page=page, page_size=page_size,
+        data=[_to_read(a) for a in apps],
     )
