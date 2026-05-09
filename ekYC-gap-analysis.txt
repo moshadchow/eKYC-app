@@ -1,0 +1,145 @@
+ Let me structure this clearly:                                                                                           
+  1. What's fully done                                                                                                     
+  2. What's partially done / needs completion                                                                              
+  3. What's completely missing that blocks onboarding                                                                                                                                                                                                 
+  I'll focus on what needs to be built next from a development perspective, not production/compliance concerns.                                                                                                                                       
+  Key gaps for completing the onboarding process:
+  1. Fingerprint UI - backend exists, no frontend
+  2. KYC Lifecycle UI - /admin/lifecycle is a stub
+  3. Face/NID selfie upload - placeholder storage key (not uploading to S3)
+  4. Annexure-1 profession/business scoring - hardcoded to 3
+  5. Document viewer - no UI to view uploaded documents
+  6. Audit page entity drill-down - partial UI
+  7. Back navigation from compliance page - no back button
+
+  For production/BFIU compliance:
+  - Real EC API
+  - Liveness detection
+  - Real sanctions screening
+  - SMS gateway
+  - OCR
+
+  Let me present this clearly.
+
+
+  Here is the full gap analysis, organized by priority:
+
+  ---
+  Gap Analysis — eKYC Onboarding
+
+  Fully Complete (end-to-end wired)
+
+  ┌───────────────────────────┬─────────┬──────┬──────────┐
+  │           Area            │ Backend │ CRUD │ Frontend │
+  ├───────────────────────────┼─────────┼──────┼──────────┤
+  │ Customer auth (OTP login) │ ✅      │ ✅   │ ✅       │
+  ├───────────────────────────┼─────────┼──────┼──────────┤
+  │ Agent auth (2FA)          │ ✅      │ ✅   │ ✅       │
+  ├───────────────────────────┼─────────┼──────┼──────────┤
+  │ Pre-check decision engine │ ✅      │ ✅   │ ✅       │
+  ├───────────────────────────┼─────────┼──────┼──────────┤
+  │ KYC application + profile │ ✅      │ ✅   │ ✅       │
+  ├───────────────────────────┼─────────┼──────┼──────────┤
+  │ NID validation (mock EC)  │ ✅      │ ✅   │ ✅       │
+  ├───────────────────────────┼─────────┼──────┼──────────┤
+  │ Face match (mock)         │ ✅      │ ✅   │ ✅       │
+  ├───────────────────────────┼─────────┼──────┼──────────┤
+  │ Document upload           │ ✅      │ ✅   │ ✅       │
+  ├───────────────────────────┼─────────┼──────┼──────────┤
+  │ Screening (simulated)     │ ✅      │ ✅   │ ✅       │
+  ├───────────────────────────┼─────────┼──────┼──────────┤
+  │ PEP/IP check              │ ✅      │ ✅   │ ✅       │
+  ├───────────────────────────┼─────────┼──────┼──────────┤
+  │ EDD request + documents   │ ✅      │ ✅   │ ✅       │
+  ├───────────────────────────┼─────────┼──────┼──────────┤
+  │ Maker-checker approval    │ ✅      │ ✅   │ ✅       │
+  ├───────────────────────────┼─────────┼──────┼──────────┤
+  │ Account activation        │ ✅      │ ✅   │ ✅       │
+  ├───────────────────────────┼─────────┼──────┼──────────┤
+  │ Audit trail               │ ✅      │ ✅   │ ✅       │
+  └───────────────────────────┴─────────┴──────┴──────────┘
+
+  ---
+  Gap 1 — KYC Lifecycle UI (API ready, zero UI)
+
+  AppRouter.tsx line 55 — literally a placeholder div:
+  <Route path="/admin/lifecycle" element={
+    <div className="p-6 text-surface-500">KYC Lifecycle — coming in next step</div>
+  } />
+  Backend APIs are fully implemented (/lifecycle/accounts/{id}/refresh-schedule, /refresh/initiate, /refresh/complete,
+  /accounts/overdue). Needs a full dashboard page.
+
+  ---
+  Gap 2 — Fingerprint Verification (no frontend at all)
+
+  Backend endpoint /kyc/applications/{app_id}/verify/fingerprint and CRUD exist. onboardingStore has no fingerprint step.
+  The OnboardingPage.tsx flow goes nid_capture → face_match → profile — fingerprint is never surfaced to the user for
+  assisted onboarding channel.
+
+  ---
+  Gap 3 — Face Selfie Not Actually Uploaded
+
+  OnboardingPage.tsx line ~186 has this comment:
+  // For dev: use a placeholder storage key
+  The selfie capture works in the UI but the image is never sent to storage — a fake storage_key is passed to the backend.
+  The document upload endpoint exists and works; it just isn't wired to the face capture step.
+
+  ---
+  Gap 4 — Risk Scoring: Profession & Business Activity Hardcoded
+
+  crud_compliance.py hardcodes:
+  score_business_activity: 3
+  score_profession: 3
+  BFIU Annexure-1 requires a lookup table — e.g. Jeweler/Money Changer/Real Estate → 5, IT Employee/Lawyer → 4, Salaried →
+  1. Without this, high-risk profiles get underscored and may bypass EDD. The CustomerProfile model already stores
+  profession and source_of_fund — the data exists, the scoring logic just isn't written.
+
+  ---
+  Gap 5 — Notification Delivery (records written, nothing sent)
+
+  Account activation creates a notifications table row. No SMS or email gateway is wired. There is no background worker or
+  scheduled task sending those records. For onboarding completion the customer receives no confirmation.
+
+  ---
+  Gap 6 — Compliance Page Navigation
+
+  CompliancePage.tsx has no back button to return to the agent queue. After submitting a decision the agent has to manually   navigate. Minor UX gap.
+
+  ---
+  Gap 7 — No Document Viewer
+
+  Uploaded documents (NID front/back, selfie, signature) are stored with a storage_key but there is no UI anywhere to
+  render or preview them — neither in the compliance review page nor in the admin approval summary.
+
+  ---
+  Gap 8 — Audit Page: No Entity Drill-down
+
+  AuditPage.tsx lists logs but there is no detail view / entity-specific trail. The backend supports GET
+  /audit/entities/{entity_type}/{entity_id} — it's just not wired in the frontend.
+
+  ---
+  Summary — What to Build Next
+
+  ┌───────────┬────────────────────────────────────────────────┬────────┐
+  │ Priority  │                      Gap                       │ Effort │
+  ├───────────┼────────────────────────────────────────────────┼────────┤
+  │ 🔴 High   │ KYC Lifecycle dashboard UI                     │ Large  │
+  ├───────────┼────────────────────────────────────────────────┼────────┤
+  │ 🔴 High   │ Profession/business Annexure-1 scoring table   │ Small  │
+  ├───────────┼────────────────────────────────────────────────┼────────┤
+  │ 🔴 High   │ Fingerprint step in onboarding flow (frontend) │ Medium │
+  ├───────────┼────────────────────────────────────────────────┼────────┤
+  │ 🟡 Medium │ Wire face selfie to document upload endpoint   │ Small  │
+  ├───────────┼────────────────────────────────────────────────┼────────┤
+  │ 🟡 Medium │ Notification delivery (SMS/email gateway)      │ Medium │
+  ├───────────┼────────────────────────────────────────────────┼────────┤
+  │ 🟡 Medium │ Document viewer in compliance/admin pages      │ Medium │
+  ├───────────┼────────────────────────────────────────────────┼────────┤
+  │ 🟢 Low    │ Audit entity drill-down view                   │ Small  │
+  ├───────────┼────────────────────────────────────────────────┼────────┤
+  │ 🟢 Low    │ Back-navigation from compliance page           │ Tiny   │
+  └───────────┴────────────────────────────────────────────────┴────────┘
+
+  The onboarding happy path (customer logs in → pre-check → NID → face → profile → submit → agent reviews → approves →
+  account activated) is complete end-to-end. The gaps above are either the lifecycle management phase (after activation),
+  assisted onboarding (fingerprint), BFIU scoring accuracy (Annexure-1), and UI polish (viewer, navigation, notifications).

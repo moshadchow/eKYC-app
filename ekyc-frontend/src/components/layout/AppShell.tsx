@@ -3,18 +3,20 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { clsx } from 'clsx'
 import {
   ShieldCheck, FileText, LayoutDashboard, Users, Settings,
-  LogOut, ClipboardList, RefreshCw, Activity, ChevronRight,
+  LogOut, ClipboardList, RefreshCw, Activity, ChevronRight, UserCheck,
 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { agentAuthAPI } from '@/api/services'
 
 const customerNav = [
   { to: '/onboarding', icon: <FileText className="h-4 w-4" />, label: 'New Application' },
+  { to: '/lifecycle', icon: <RefreshCw className="h-4 w-4" />, label: 'KYC Status' },
 ]
 
 const agentNav = [
   { to: '/agent/dashboard', icon: <LayoutDashboard className="h-4 w-4" />, label: 'Dashboard' },
   { to: '/agent/queue', icon: <ClipboardList className="h-4 w-4" />, label: 'Review Queue' },
+  { to: '/agent/onboarding', icon: <UserCheck className="h-4 w-4" />, label: 'Assist Customer' },
 ]
 
 const adminNav = [

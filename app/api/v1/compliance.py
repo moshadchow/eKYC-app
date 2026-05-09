@@ -132,12 +132,17 @@ async def calculate_risk_score(
         new_value={"total": rs.total_score, "classification": rs.risk_classification},
         ip_address=request.client.host if request.client else None,
     )
+    # Filter out diagnostic keys from score_breakdown
+    score_breakdown = {k: v for k, v in scores.items() if not k.startswith("_")}
+
     return APIResponse(
         message=f"Risk score: {str(rs.risk_classification).upper()} (score: {rs.total_score})",
         data={
             "risk_score_id": str(rs.id), "total_score": rs.total_score,
             "risk_classification": rs.risk_classification, "edd_required": rs.edd_required,
-            "score_breakdown": scores, "version": rs.version,
+            "score_breakdown": score_breakdown, "version": rs.version,
+            "matched_profession_category": scores.get("_matched_profession_category"),
+            "matched_business_category": scores.get("_matched_business_category"),
         },
     )
 

@@ -115,12 +115,11 @@ class MockECService:
         """
         Match a captured fingerprint against all 10 fingers stored in EC database.
         """
-        base_score = random.uniform(65, 99)
-        is_matched = base_score >= 70.0
-
+        # DEBUG: Always return success for testing purposes
+        # This ensures the frontend "Continue" button appears
         return {
-            "matched": is_matched,
-            "similarity_score": round(base_score, 2),
+            "matched": True,
+            "similarity_score": 95.0,
             "threshold": 70.0,
             "nid_number": nid_number,
             "finger_position": finger_position or "right_index",

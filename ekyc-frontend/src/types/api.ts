@@ -130,6 +130,7 @@ export interface CustomerProfileRequest {
   gender?: Gender
   tin_number?: string
   profession?: string
+  business_activity?: string
   monthly_income?: number
   source_of_fund?: SourceOfFund
   source_of_fund_detail?: string
@@ -196,6 +197,23 @@ export interface FaceMatchResult {
   attempts_remaining: number
 }
 
+export interface SelfieUploadUrlResponse {
+  upload_url: string
+  storage_key: string
+  expires_in: number
+}
+
+export interface FingerprintResult {
+  matched: boolean
+  similarity_score: number
+  attempt_number: number
+  session_number: number
+  suggest_face_fallback: boolean
+  fallback_message: string | null
+}
+
+export type OnboardingChannelValue = 'self_checkin' | 'assisted' | 'branch' | 'internet'
+
 export interface DocumentUploadRequest {
   document_type: DocumentType
   storage_key: string
@@ -256,6 +274,8 @@ export interface RiskScoreResult {
   score_breakdown: Record<string, number>
   version: number
   scored_at?: string
+  matched_profession_category?: string
+  matched_business_category?: string
 }
 
 export interface EDDRequestResult {
@@ -320,6 +340,19 @@ export interface AccountActivated {
 export interface RefreshSchedule {
   schedule_id: string
   risk_tier: string
+  due_date: string
+  status: RefreshStatus
+  days_remaining: number
+  is_overdue: boolean
+  reminder_count: number
+  last_reminder_at: string | null
+}
+
+export interface ScheduleListItem {
+  schedule_id: string
+  account_id: string
+  user_id: string
+  risk_tier: RiskClassification
   due_date: string
   status: RefreshStatus
   days_remaining: number

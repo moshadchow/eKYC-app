@@ -5,10 +5,10 @@ import type {
   AgentProfile, PreCheckRequest, PreCheckResult,
   CreateApplicationRequest, ApplicationRead, CustomerProfileRequest,
   NomineeRequest, SignatureRequest, NIDVerifyRequest, NIDRecord,
-  FaceMatchRequest, FaceMatchResult, DocumentUploadRequest, VerificationStatus,
+  FaceMatchRequest, FaceMatchResult, FingerprintResult, SelfieUploadUrlResponse, DocumentUploadRequest, VerificationStatus,
   ScreeningResultItem, PEPCheckRequest, RiskScoreRequest, RiskScoreResult,
   EDDRequestResult, EDDStatus_t, QueueEntry, ReviewSummary,
-  DecisionRequest, AccountActivated, RefreshSchedule,
+  DecisionRequest, AccountActivated, RefreshSchedule, ScheduleListItem,
 } from '@/types/api'
 
 // ── Auth — Customer ───────────────────────────────────────────────────────────
@@ -50,9 +50,21 @@ export const verificationAPI = {
   validateNID:    (appId: string, body: NIDVerifyRequest)    => apiClient.post<APIResponse<NIDRecord>>(`/kyc/applications/${appId}/verify/nid`, body),
   faceMatch:      (appId: string, body: FaceMatchRequest)    => apiClient.post<APIResponse<FaceMatchResult>>(`/kyc/applications/${appId}/verify/face`, body),
   fingerprint:    (appId: string, body: { nid_number: string; fingerprint_template: string; finger_position?: string; date_of_birth: string }) =>
-    apiClient.post<APIResponse<FaceMatchResult & { suggest_face_fallback: boolean; fallback_message: string | null }>>(`/kyc/applications/${appId}/verify/fingerprint`, body),
+    apiClient.post<APIResponse<FingerprintResult>>(`/kyc/applications/${appId}/verify/fingerprint`, body),
+  getSelfieUploadUrl: (appId: string, contentType = 'image/jpeg') =>
+    apiClient.get<APIResponse<SelfieUploadUrlResponse>>(`/kyc/applications/${appId}/selfie-upload-url`, { params: { content_type: contentType } }),
   status:         (appId: string)                            => apiClient.get<APIResponse<VerificationStatus>>(`/kyc/applications/${appId}/verify/status`),
   uploadDocument: (appId: string, body: DocumentUploadRequest) => apiClient.post<APIResponse<{ document_id: string; version: number }>>(`/kyc/applications/${appId}/documents/upload`, body),
+}
+
+// ── Selfie Upload (direct PUT to object storage — no auth header) ─────────────
+export async function uploadSelfieBlob(uploadUrl: string, blob: Blob): Promise<void> {
+  const res = await fetch(uploadUrl, {
+    method: 'PUT',
+    body: blob,
+    headers: { 'Content-Type': blob.type || 'image/jpeg' },
+  })
+  if (!res.ok) throw new Error(`Selfie upload failed: ${res.status} ${res.statusText}`)
 }
 
 // ── Compliance ────────────────────────────────────────────────────────────────
@@ -88,8 +100,12 @@ export const auditAPI = {
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 export const lifecycleAPI = {
-  getSchedule:     (accountId: string)                        => apiClient.get<APIResponse<RefreshSchedule>>(`/lifecycle/accounts/${accountId}/refresh-schedule`),
-  initiate:        (accountId: string)                        => apiClient.post<APIResponse<{ schedule_id: string; status: string }>>(`/lifecycle/accounts/${accountId}/refresh/initiate`),
-  complete:        (accountId: string, tier?: string)         => apiClient.post<APIResponse<{ next_review_date: string; risk_tier: string }>>(`/lifecycle/accounts/${accountId}/refresh/complete`, null, { params: tier ? { new_risk_tier: tier } : {} }),
-  overdue:         ()                                         => apiClient.get<APIResponse<unknown[]>>('/lifecycle/accounts/overdue'),
+  getSchedule:  (accountId: string)                        => apiClient.get<APIResponse<RefreshSchedule>>(`/lifecycle/accounts/${accountId}/refresh-schedule`),
+  initiate:     (accountId: string)                        => apiClient.post<APIResponse<{ schedule_id: string; status: string }>>(`/lifecycle/accounts/${accountId}/refresh/initiate`),
+  complete:     (accountId: string, tier?: string)         => apiClient.post<APIResponse<{ next_review_date: string; risk_tier: string }>>(`/lifecycle/accounts/${accountId}/refresh/complete`, null, { params: tier ? { new_risk_tier: tier } : {} }),
+  overdue:      ()                                         => apiClient.get<APIResponse<ScheduleListItem[]>>('/lifecycle/accounts/overdue'),
+  listAll:      (params?: { risk_tier?: string; status?: string; page?: number; page_size?: number }) =>
+    apiClient.get<PaginatedResponse<ScheduleListItem>>('/lifecycle/accounts', { params }),
+  sendReminder: (accountId: string)                        =>
+    apiClient.post<APIResponse<{ schedule_id: string; reminder_count: number; last_reminder_at: string }>>(`/lifecycle/accounts/${accountId}/reminder`),
 }

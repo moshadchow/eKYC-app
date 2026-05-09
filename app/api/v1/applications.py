@@ -40,6 +40,7 @@ class CustomerProfileRequest(BaseModel):
     gender: Gender | None = None
     tin_number: str | None = None
     profession: str | None = None
+    business_activity: str | None = None
     monthly_income: Decimal | None = None
     source_of_fund: SourceOfFund | None = None
     source_of_fund_detail: str | None = None

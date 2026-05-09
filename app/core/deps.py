@@ -70,6 +70,39 @@ async def get_current_agent(
 CurrentAgent = Annotated[Agent, Depends(get_current_agent)]
 
 
+# ── Current actor (either customer or agent) ─────────────────────────────────
+
+class Actor:
+    """Holds actor info for endpoints that accept either customer or agent."""
+    def __init__(self, actor_id: uuid.UUID, actor_type: str):
+        self.id = actor_id
+        self.actor_type = actor_type  # "customer" or "agent"
+
+    @property
+    def is_customer(self) -> bool:
+        return self.actor_type == "customer"
+
+    @property
+    def is_agent(self) -> bool:
+        return self.actor_type == "agent"
+
+
+async def get_current_actor(
+    payload: Annotated[dict, Depends(_extract_payload)],
+) -> Actor:
+    actor_type = payload.get("actor_type")
+    if actor_type not in ("customer", "agent"):
+        raise HTTPException(
+            status_code=403,
+            detail="Valid customer or agent token required"
+        )
+    actor_id = uuid.UUID(payload.get("sub"))
+    return Actor(actor_id=actor_id, actor_type=actor_type)
+
+
+CurrentActor = Annotated[Actor, Depends(get_current_actor)]
+
+
 # ── Role guards ───────────────────────────────────────────────────────────────
 
 def require_roles(*roles: AgentRole):

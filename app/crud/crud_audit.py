@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import HTTPException
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -169,6 +170,66 @@ class CRUDLifecycle:
             )
         )
         return list(result.scalars().all())
+
+    async def list_all(
+        self,
+        db: AsyncSession,
+        risk_tier: Optional[str] = None,
+        status: Optional[str] = None,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[list[KYCRefreshSchedule], int]:
+        query = select(KYCRefreshSchedule)
+        count_query = select(func.count()).select_from(KYCRefreshSchedule)
+
+        if risk_tier:
+            query = query.where(KYCRefreshSchedule.risk_tier == risk_tier)
+            count_query = count_query.where(KYCRefreshSchedule.risk_tier == risk_tier)
+
+        if status == "overdue":
+            today = date.today()
+            overdue_filter = (
+                KYCRefreshSchedule.due_date < today,
+                KYCRefreshSchedule.status.in_([
+                    RefreshStatus.scheduled.value,
+                    RefreshStatus.reminder_sent.value,
+                ]),
+            )
+            query = query.where(*overdue_filter)
+            count_query = count_query.where(*overdue_filter)
+        elif status:
+            query = query.where(KYCRefreshSchedule.status == status)
+            count_query = count_query.where(KYCRefreshSchedule.status == status)
+
+        query = query.order_by(KYCRefreshSchedule.due_date.asc()).offset(offset).limit(limit)
+        result = await db.execute(query)
+        total_result = await db.execute(count_query)
+        return list(result.scalars().all()), (total_result.scalar_one() or 0)
+
+    async def send_reminder(
+        self,
+        db: AsyncSession,
+        account_id: uuid.UUID,
+        agent_employee_id: str,
+    ) -> KYCRefreshSchedule:
+        result = await db.execute(
+            select(KYCRefreshSchedule).where(KYCRefreshSchedule.account_id == account_id)
+        )
+        schedule = result.scalar_one_or_none()
+        if not schedule:
+            raise HTTPException(status_code=404, detail="No refresh schedule found for this account")
+        if schedule.status == RefreshStatus.completed.value:
+            raise HTTPException(status_code=400, detail="Cannot send reminder for a completed schedule")
+
+        schedule.reminder_count += 1
+        schedule.last_reminder_at = utcnow()
+        schedule.status = RefreshStatus.reminder_sent.value
+        db.add(KYCRefreshEvent(
+            schedule_id=schedule.id,
+            event_type=RefreshEventType.reminder_sent.value,
+            notes=f"Reminder #{schedule.reminder_count} sent by agent {agent_employee_id}",
+        ))
+        return schedule
 
 
 crud_lifecycle = CRUDLifecycle()

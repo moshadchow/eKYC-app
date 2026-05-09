@@ -140,6 +140,12 @@ export default function CompliancePage() {
                   <div key={k} className="bg-surface-50 rounded-lg p-3 text-center">
                     <div className="text-lg font-semibold text-surface-800">{v as number}</div>
                     <div className="text-xs text-surface-500 mt-0.5 capitalize">{k.replace(/_/g, ' ')}</div>
+                    {k === 'score_profession' && riskScore.matched_profession_category && (
+                      <div className="text-xs text-brand-500 mt-0.5 italic">{riskScore.matched_profession_category.replace(/_/g, ' ')}</div>
+                    )}
+                    {k === 'score_business_activity' && riskScore.matched_business_category && (
+                      <div className="text-xs text-brand-500 mt-0.5 italic">{riskScore.matched_business_category.replace(/_/g, ' ')}</div>
+                    )}
                   </div>
                 ))}
               </div>

@@ -13,9 +13,14 @@ import OnboardingPage from '@/pages/onboarding/OnboardingPage'
 // Agent
 import AgentQueuePage from '@/pages/agent/AgentQueuePage'
 import CompliancePage from '@/pages/agent/CompliancePage'
+import AgentOnboardingPage from '@/pages/agent/AgentOnboardingPage'
 
 // Admin
 import AuditPage from '@/pages/admin/AuditPage'
+import LifecyclePage from '@/pages/admin/LifecyclePage'
+
+// Customer
+import CustomerLifecyclePage from '@/pages/customer/CustomerLifecyclePage'
 
 function RequireAuth({ children, role }: { children: React.ReactElement; role?: 'customer' | 'agent' }) {
   const { isAuthenticated, actorType } = useAuthStore()
@@ -43,6 +48,7 @@ export default function AppRouter() {
       {/* Customer */}
       <Route element={<RequireAuth role="customer"><AppShell /></RequireAuth>}>
         <Route path="/onboarding" element={<OnboardingPage />} />
+        <Route path="/lifecycle" element={<CustomerLifecyclePage />} />
       </Route>
 
       {/* Agent */}
@@ -50,9 +56,10 @@ export default function AppRouter() {
         <Route path="/agent/dashboard" element={<AgentQueuePage />} />
         <Route path="/agent/queue" element={<AgentQueuePage />} />
         <Route path="/agent/compliance/:appId" element={<CompliancePage />} />
+        <Route path="/agent/onboarding/:appId?" element={<AgentOnboardingPage />} />
         <Route path="/admin/queue" element={<AgentQueuePage />} />
         <Route path="/admin/audit" element={<AuditPage />} />
-        <Route path="/admin/lifecycle" element={<div className="p-6 text-surface-500">KYC Lifecycle — coming in next step</div>} />
+        <Route path="/admin/lifecycle" element={<LifecyclePage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

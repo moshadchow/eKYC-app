@@ -46,10 +46,12 @@ export default function AgentLoginPage() {
         device_fingerprint: 'web-browser-agent',
       })
       if (res.data.success && res.data.data) {
-        // Fetch agent profile for role
+        const { access_token, refresh_token } = res.data.data
+        // Store token before calling me() so the request interceptor can attach it
+        localStorage.setItem('access_token', access_token)
         const meRes = await agentAuthAPI.me()
         const role = meRes.data.data?.role ?? 'maker'
-        setAgentTokens(res.data.data.access_token, res.data.data.refresh_token, employeeId, role)
+        setAgentTokens(access_token, refresh_token, employeeId, role)
         navigate('/agent/dashboard')
       }
     } catch (err) {

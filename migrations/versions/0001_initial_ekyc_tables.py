@@ -74,8 +74,8 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("now()"),
         ),
-        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
+        # no FK on user_id — stores both customer UUIDs and agent UUIDs
     )
     op.create_index("ix_otp_logs_user_id", "otp_logs", ["user_id"])
 

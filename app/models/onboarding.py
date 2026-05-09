@@ -96,6 +96,7 @@ class CustomerProfileBase(SQLModel):
     nid_number: str = Field(max_length=20, index=True)
     tin_number: Optional[str] = Field(default=None, max_length=20)
     profession: Optional[str] = Field(default=None, max_length=255)
+    business_activity: Optional[str] = Field(default=None, max_length=255)
     monthly_income: Optional[Decimal] = Field(
         default=None,
         sa_column=sa.Column(sa.Numeric(18, 2), nullable=True),

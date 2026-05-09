@@ -40,6 +40,9 @@ class Settings(BaseSettings):
 
     # Storage
     STORAGE_BUCKET: str = "ekyc-documents"
+    STORAGE_ENDPOINT: str = "http://localhost:9000"
+    STORAGE_ACCESS_KEY: str = "minioadmin"
+    STORAGE_SECRET_KEY: str = "minioadmin"
 
     class Config:
         env_file = ".env"

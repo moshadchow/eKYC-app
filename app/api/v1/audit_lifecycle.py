@@ -109,4 +109,49 @@ async def get_overdue_refreshes(current_agent: CurrentAgent, db: DBSession):
         "user_id": str(s.user_id), "risk_tier": s.risk_tier,
         "due_date": str(s.due_date), "days_overdue": (today - s.due_date).days,
         "reminder_count": s.reminder_count,
+        "status": s.status,
+        "last_reminder_at": str(s.last_reminder_at) if s.last_reminder_at else None,
+        "is_overdue": True,
     } for s in overdue])
+
+
+@lifecycle_router.get("/accounts", response_model=PaginatedResponse[dict])
+async def list_refresh_schedules(
+    current_agent: CurrentAgent, db: DBSession,
+    risk_tier: str | None = None, status: str | None = None,
+    page: int = 1, page_size: int = 20,
+):
+    """Phase 12: Paginated list of all KYC refresh schedules — for agent dashboard."""
+    schedules, total = await crud_lifecycle.list_all(
+        db, risk_tier=risk_tier, status=status,
+        offset=(page - 1) * page_size, limit=page_size,
+    )
+    today = date.today()
+    return PaginatedResponse(total=total, page=page, page_size=page_size, data=[{
+        "schedule_id": str(s.id), "account_id": str(s.account_id),
+        "user_id": str(s.user_id), "risk_tier": s.risk_tier,
+        "due_date": str(s.due_date), "status": s.status,
+        "days_remaining": (s.due_date - today).days,
+        "is_overdue": (s.due_date - today).days < 0,
+        "reminder_count": s.reminder_count,
+        "last_reminder_at": str(s.last_reminder_at) if s.last_reminder_at else None,
+    } for s in schedules])
+
+
+@lifecycle_router.post("/accounts/{account_id}/reminder", response_model=APIResponse[dict])
+async def send_kyc_reminder(
+    account_id: uuid.UUID, request: Request,
+    current_agent: CurrentAgent, db: DBSession,
+):
+    """Phase 12: Agent sends KYC refresh reminder to customer."""
+    schedule = await crud_lifecycle.send_reminder(db, account_id, current_agent.employee_id)
+    await record_event(
+        db, actor_id=str(current_agent.id), actor_type=ActorType.agent,
+        action=AuditAction.kyc_refresh_reminder, entity_type="kyc_refresh_schedules",
+        entity_id=str(schedule.id), ip_address=request.client.host if request.client else None,
+    )
+    return APIResponse(message="Reminder sent", data={
+        "schedule_id": str(schedule.id),
+        "reminder_count": schedule.reminder_count,
+        "last_reminder_at": str(schedule.last_reminder_at),
+    })

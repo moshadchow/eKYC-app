@@ -1,11 +1,12 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { PreCheckResult, ApplicationRead, NIDRecord, FaceMatchResult, VerificationStatus } from '@/types/api'
+import type { PreCheckResult, ApplicationRead, NIDRecord, FaceMatchResult, FingerprintResult, OnboardingChannelValue, VerificationStatus } from '@/types/api'
 
 export type OnboardingStep =
   | 'pre_check'
   | 'create_application'
   | 'nid_capture'
+  | 'fingerprint'
   | 'face_match'
   | 'profile'
   | 'nominee'
@@ -19,6 +20,8 @@ interface OnboardingState {
   application: ApplicationRead | null
   nidRecord: NIDRecord | null
   faceMatchResult: FaceMatchResult | null
+  fingerprintResult: FingerprintResult | null
+  onboardingChannel: OnboardingChannelValue | null
   verificationStatus: VerificationStatus | null
   profileSaved: boolean
   nomineeSaved: boolean
@@ -29,6 +32,8 @@ interface OnboardingState {
   setApplication:         (a: ApplicationRead) => void
   setNIDRecord:           (n: NIDRecord) => void
   setFaceMatchResult:     (f: FaceMatchResult) => void
+  setFingerprintResult:   (r: FingerprintResult) => void
+  setOnboardingChannel:   (channel: OnboardingChannelValue) => void
   setVerificationStatus:  (v: VerificationStatus) => void
   markProfileSaved:       () => void
   markNomineeSaved:       () => void
@@ -42,6 +47,8 @@ const initial = {
   application: null,
   nidRecord: null,
   faceMatchResult: null,
+  fingerprintResult: null,
+  onboardingChannel: null,
   verificationStatus: null,
   profileSaved: false,
   nomineeSaved: false,
@@ -57,6 +64,8 @@ export const useOnboardingStore = create<OnboardingState>()(
       setApplication:        (a)    => set({ application: a }),
       setNIDRecord:          (n)    => set({ nidRecord: n }),
       setFaceMatchResult:    (f)    => set({ faceMatchResult: f }),
+      setFingerprintResult:  (r)    => set({ fingerprintResult: r }),
+      setOnboardingChannel:  (ch)   => set({ onboardingChannel: ch }),
       setVerificationStatus: (v)    => set({ verificationStatus: v }),
       markProfileSaved:      ()     => set({ profileSaved: true }),
       markNomineeSaved:      ()     => set({ nomineeSaved: true }),

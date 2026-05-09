@@ -11,9 +11,11 @@ interface AuthState {
   employeeId: string | null
   agentRole: string | null
   isAuthenticated: boolean
+  accountId: string | null
 
   setCustomerTokens: (access: string, refresh: string, mobile: string) => void
   setAgentTokens:    (access: string, refresh: string, employeeId: string, role: string) => void
+  setAccountId:      (id: string) => void
   clearAuth:         () => void
 }
 
@@ -27,6 +29,7 @@ export const useAuthStore = create<AuthState>()(
       employeeId: null,
       agentRole: null,
       isAuthenticated: false,
+      accountId: null,
 
       setCustomerTokens: (access, refresh, mobile) => {
         localStorage.setItem('access_token', access)
@@ -38,12 +41,14 @@ export const useAuthStore = create<AuthState>()(
         set({ accessToken: access, refreshToken: refresh, employeeId, agentRole: role, actorType: 'agent', isAuthenticated: true })
       },
 
+      setAccountId: (id) => set({ accountId: id }),
+
       clearAuth: () => {
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
-        set({ accessToken: null, refreshToken: null, actorType: null, mobileNumber: null, employeeId: null, agentRole: null, isAuthenticated: false })
+        set({ accessToken: null, refreshToken: null, actorType: null, mobileNumber: null, employeeId: null, agentRole: null, isAuthenticated: false, accountId: null })
       },
     }),
-    { name: 'ekyc-auth', partialize: (s) => ({ accessToken: s.accessToken, refreshToken: s.refreshToken, actorType: s.actorType, mobileNumber: s.mobileNumber, employeeId: s.employeeId, agentRole: s.agentRole, isAuthenticated: s.isAuthenticated }) }
+    { name: 'ekyc-auth', partialize: (s) => ({ accessToken: s.accessToken, refreshToken: s.refreshToken, actorType: s.actorType, mobileNumber: s.mobileNumber, employeeId: s.employeeId, agentRole: s.agentRole, isAuthenticated: s.isAuthenticated, accountId: s.accountId }) }
   )
 )

@@ -30,16 +30,23 @@ class CRUDVerification:
         self,
         db: AsyncSession,
         app_id: uuid.UUID,
-        user_id: Optional[uuid.UUID] = None,
+        actor_id: Optional[uuid.UUID] = None,
     ) -> KYCApplication:
+        """Get application and verify access for customer or agent actor."""
         result = await db.execute(
             select(KYCApplication).where(KYCApplication.id == app_id)
         )
         app = result.scalar_one_or_none()
         if not app:
             raise HTTPException(status_code=404, detail="Application not found")
-        if user_id and app.user_id != user_id:
-            raise HTTPException(status_code=403, detail="Access denied")
+        # Check access: either customer (user_id) or agent (agent_id) must match
+        if actor_id:
+            if app.user_id and app.user_id == actor_id:
+                pass  # Customer access OK
+            elif app.agent_id and app.agent_id == actor_id:
+                pass  # Agent access OK
+            else:
+                raise HTTPException(status_code=403, detail="Access denied")
         return app
 
     # ── Retry limit enforcement ───────────────────────────────────────────────

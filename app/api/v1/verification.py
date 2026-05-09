@@ -1,12 +1,14 @@
 """Phase 5 — Identity Verification (API layer only)"""
 import uuid
 from datetime import date
+from uuid import uuid4
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
-from app.core.deps import CurrentAgent, CurrentUser, DBSession
+from app.core.deps import CurrentActor, DBSession
+from app.core.storage import generate_presigned_put
 from app.crud.crud_verification import crud_verification
 from app.models.enums import ActorType, AuditAction, DocumentType
 from app.schemas.common import APIResponse
@@ -42,16 +44,26 @@ class DocumentUploadRequest(BaseModel):
     checksum_sha256: str = Field(..., min_length=64, max_length=64)
 
 
+ALLOWED_SELFIE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+
+class SelfieUploadUrlResponse(BaseModel):
+    upload_url: str
+    storage_key: str
+    expires_in: int = 300
+
+
 @router.post("/applications/{app_id}/verify/nid", response_model=APIResponse[dict])
 async def validate_nid(
     app_id: uuid.UUID, body: NIDVerifyRequest, request: Request,
-    current_user: CurrentUser, db: DBSession,
+    actor: CurrentActor, db: DBSession,
 ):
     """Phase 5: Validate NID + DOB against EC database. Returns fields for auto-fill."""
-    await crud_verification.get_application(db, app_id, current_user.id)
+    await crud_verification.get_application(db, app_id, actor.id)
     ec_result = await crud_verification.validate_nid(body.nid_number, body.date_of_birth)
+    actor_type = ActorType.customer if actor.is_customer else ActorType.agent
     await record_event(
-        db, actor_id=str(current_user.id), actor_type=ActorType.customer,
+        db, actor_id=str(actor.id), actor_type=actor_type,
         action=AuditAction.biometric_attempt, entity_type="kyc_applications", entity_id=str(app_id),
         new_value={"nid_validated": True, "nid_number": body.nid_number},
         ip_address=request.client.host if request.client else None,
@@ -76,17 +88,18 @@ async def validate_nid(
 @router.post("/applications/{app_id}/verify/face", response_model=APIResponse[dict])
 async def verify_face(
     app_id: uuid.UUID, body: FaceMatchRequest, request: Request,
-    current_user: CurrentUser, db: DBSession,
+    actor: CurrentActor, db: DBSession,
 ):
     """Phase 5: Face matching. Max 10 attempts/session, 2 sessions/day, 3 total (BFIU)."""
-    await crud_verification.get_application(db, app_id, current_user.id)
+    await crud_verification.get_application(db, app_id, actor.id)
     ip = request.client.host if request.client else None
     verification = await crud_verification.run_face_match(
         db, app_id, body.nid_number, body.selfie_storage_key,
         body.date_of_birth, ip, request.headers.get("user-agent"),
     )
+    actor_type = ActorType.customer if actor.is_customer else ActorType.agent
     await record_event(
-        db, actor_id=str(current_user.id), actor_type=ActorType.customer,
+        db, actor_id=str(actor.id), actor_type=actor_type,
         action=AuditAction.biometric_success if verification.is_matched else AuditAction.biometric_failure,
         entity_type="biometric_verifications", entity_id=str(verification.id),
         new_value={"type": "face_match", "score": verification.similarity_score, "matched": verification.is_matched},
@@ -104,20 +117,37 @@ async def verify_face(
     )
 
 
+@router.get("/applications/{app_id}/selfie-upload-url", response_model=APIResponse[SelfieUploadUrlResponse])
+async def get_selfie_upload_url(
+    app_id: uuid.UUID,
+    actor: CurrentActor,
+    db: DBSession,
+    content_type: str = "image/jpeg",
+):
+    """Generate a presigned PUT URL for direct selfie upload to object storage."""
+    if content_type not in ALLOWED_SELFIE_CONTENT_TYPES:
+        raise HTTPException(status_code=422, detail=f"content_type must be one of {ALLOWED_SELFIE_CONTENT_TYPES}")
+    await crud_verification.get_application(db, app_id, actor.id)
+    key = f"selfies/{app_id}/{uuid4()}.jpg"
+    url = generate_presigned_put(key, content_type, expires=300)
+    return APIResponse(data=SelfieUploadUrlResponse(upload_url=url, storage_key=key))
+
+
 @router.post("/applications/{app_id}/verify/fingerprint", response_model=APIResponse[dict])
 async def verify_fingerprint(
     app_id: uuid.UUID, body: FingerprintMatchRequest, request: Request,
-    current_agent: CurrentAgent, db: DBSession,
+    actor: CurrentActor, db: DBSession,
 ):
     """Phase 4 (Assisted only): Fingerprint match. Falls back to face after 3 failed sessions."""
-    await crud_verification.get_application(db, app_id)
+    await crud_verification.get_application(db, app_id, actor.id)
     ip = request.client.host if request.client else None
     verification, suggest_fallback = await crud_verification.run_fingerprint_match(
         db, app_id, body.nid_number, body.fingerprint_template,
         body.date_of_birth, body.finger_position, ip, request.headers.get("user-agent"),
     )
+    actor_type = ActorType.customer if actor.is_customer else ActorType.agent
     await record_event(
-        db, actor_id=str(current_agent.id), actor_type=ActorType.agent,
+        db, actor_id=str(actor.id), actor_type=actor_type,
         action=AuditAction.biometric_success if verification.is_matched else AuditAction.biometric_failure,
         entity_type="biometric_verifications", entity_id=str(verification.id),
         new_value={"type": "fingerprint", "score": verification.similarity_score, "matched": verification.is_matched},
@@ -138,10 +168,10 @@ async def verify_fingerprint(
 
 @router.get("/applications/{app_id}/verify/status", response_model=APIResponse[dict])
 async def get_verification_status(
-    app_id: uuid.UUID, current_user: CurrentUser, db: DBSession,
+    app_id: uuid.UUID, actor: CurrentActor, db: DBSession,
 ):
     """Get biometric verification status for an application."""
-    await crud_verification.get_application(db, app_id, current_user.id)
+    await crud_verification.get_application(db, app_id, actor.id)
     status = await crud_verification.get_verification_status(db, app_id)
     return APIResponse(data=status)
 
@@ -149,17 +179,18 @@ async def get_verification_status(
 @router.post("/applications/{app_id}/documents/upload", response_model=APIResponse[dict])
 async def register_document(
     app_id: uuid.UUID, body: DocumentUploadRequest, request: Request,
-    current_user: CurrentUser, db: DBSession,
+    actor: CurrentActor, db: DBSession,
 ):
     """Phase 5: Register document metadata after binary upload via presigned URL."""
-    await crud_verification.get_application(db, app_id, current_user.id)
+    await crud_verification.get_application(db, app_id, actor.id)
     doc = await crud_verification.register_document(
         db, app_id, body.document_type, body.storage_key,
         body.mime_type, body.file_size_bytes, body.checksum_sha256,
         body.original_filename,
     )
+    actor_type = ActorType.customer if actor.is_customer else ActorType.agent
     await record_event(
-        db, actor_id=str(current_user.id), actor_type=ActorType.customer,
+        db, actor_id=str(actor.id), actor_type=actor_type,
         action=AuditAction.create, entity_type="kyc_documents", entity_id=str(doc.id),
         new_value={"document_type": body.document_type.value, "version": doc.version},
         ip_address=request.client.host if request.client else None,

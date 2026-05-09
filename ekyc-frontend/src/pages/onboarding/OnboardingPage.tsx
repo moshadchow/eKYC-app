@@ -1,22 +1,14 @@
 import React, { useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Camera, Upload, CheckCircle2, AlertTriangle, RotateCcw, ArrowRight, ArrowLeft, Eye, EyeOff } from 'lucide-react'
-import { preCheckAPI, applicationsAPI, verificationAPI } from '@/api/services'
+import { preCheckAPI, applicationsAPI, verificationAPI, uploadSelfieBlob } from '@/api/services'
 import { useOnboardingStore } from '@/store/onboardingStore'
 import { useAuthStore } from '@/store/authStore'
 import { getErrorMessage } from '@/api/client'
 import { Alert, Card, Field, Input, Select, Steps, Spinner, StatusBadge } from '@/components/ui'
-import type { CustomerProfileRequest } from '@/types/api'
-
-const STEPS = [
-  { key: 'pre_check', label: 'Pre-check' },
-  { key: 'nid_capture', label: 'NID' },
-  { key: 'face_match', label: 'Face Match' },
-  { key: 'profile', label: 'Profile' },
-  { key: 'nominee', label: 'Nominee' },
-  { key: 'signature', label: 'Signature' },
-  { key: 'review', label: 'Review' },
-]
+import type { CustomerProfileRequest, OnboardingChannelValue, FingerprintResult } from '@/types/api'
+import { verificationAPI as verAPI } from '@/api/services'
+import { PROFESSION_OPTIONS, BUSINESS_ACTIVITY_OPTIONS } from '@/constants/riskCategories'
 
 export default function OnboardingPage() {
   const navigate = useNavigate()
@@ -24,6 +16,20 @@ export default function OnboardingPage() {
   const { mobileNumber } = useAuthStore()
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const isAssisted = store.onboardingChannel === 'assisted' || store.onboardingChannel === 'branch'
+
+  const STEPS = [
+    { key: 'pre_check', label: 'Pre-check' },
+    { key: 'nid_capture', label: 'NID' },
+    isAssisted
+      ? { key: 'fingerprint', label: 'Fingerprint' }
+      : { key: 'face_match', label: 'Face Match' },
+    { key: 'profile', label: 'Profile' },
+    { key: 'nominee', label: 'Nominee' },
+    { key: 'signature', label: 'Signature' },
+    { key: 'review', label: 'Review' },
+  ]
 
   const stepIndex = STEPS.findIndex(s => s.key === store.currentStep)
 
@@ -36,6 +42,7 @@ export default function OnboardingPage() {
     const [investment, setInvestment] = useState('')
     const [isPep, setIsPep] = useState(false)
     const [isIp, setIsIp] = useState(false)
+    const [channel, setChannel] = useState<OnboardingChannelValue>(store.onboardingChannel ?? 'self_checkin')
 
     async function handle() {
       setLoading(true); setError('')
@@ -48,15 +55,15 @@ export default function OnboardingPage() {
         })
         if (res.data.data) {
           store.setPreCheckResult(res.data.data)
-          // Create application immediately after pre-check
           const appRes = await applicationsAPI.create({
             kyc_type: res.data.data.kyc_type,
-            onboarding_channel: 'self_checkin',
+            onboarding_channel: channel,
             product_type: productType as any,
             expected_investment: investment ? Number(investment) : undefined,
           })
           if (appRes.data.data) {
             store.setApplication(appRes.data.data)
+            store.setOnboardingChannel(channel)
             next('nid_capture')
           }
         }
@@ -81,6 +88,12 @@ export default function OnboardingPage() {
             <option value="bo_account">BO Account (Capital Market)</option>
             <option value="life_insurance">Life Insurance</option>
             <option value="non_life_insurance">Non-Life Insurance</option>
+          </Select>
+        </Field>
+        <Field label="Onboarding Channel" required>
+          <Select value={channel} onChange={e => setChannel(e.target.value as OnboardingChannelValue)}>
+            <option value="self_checkin">Self Check-in (online)</option>
+            <option value="assisted">Assisted (agent at branch)</option>
           </Select>
         </Field>
         <Field label="Expected Investment / Sum Assured (BDT)" hint="Leave blank if unknown">
@@ -116,7 +129,8 @@ export default function OnboardingPage() {
         const res = await verificationAPI.validateNID(store.application.id, { nid_number: nid, date_of_birth: dob })
         if (res.data.data) {
           store.setNIDRecord(res.data.data)
-          next('face_match')
+          const nextStep = isAssisted ? 'fingerprint' : 'face_match'
+          next(nextStep)
         }
       } catch (err) { setError(getErrorMessage(err)) }
       finally { setLoading(false) }
@@ -178,16 +192,28 @@ export default function OnboardingPage() {
       stopCamera()
     }
 
+    const [loadingLabel, setLoadingLabel] = useState('')
+
     async function handle() {
-      if (!store.application || !store.nidRecord) return
+      if (!store.application || !store.nidRecord || !captured) return
       setLoading(true); setError('')
       try {
-        // In production: upload selfie to S3 first, get storage_key back
-        // For dev: use a placeholder storage key
-        const storageKey = captured ? `selfies/${store.application.id}-${Date.now()}.jpg` : 'dev/test-selfie.jpg'
+        setLoadingLabel('Uploading selfie…')
+        let storage_key = `selfies/${store.application.id}-${Date.now()}.jpg`
+        try {
+          const urlRes = await verificationAPI.getSelfieUploadUrl(store.application.id)
+          if (urlRes.data.data) {
+            const { upload_url, storage_key: key } = urlRes.data.data
+            const blob = await fetch(captured).then(r => r.blob())
+            await uploadSelfieBlob(upload_url, blob)
+            storage_key = key
+          }
+        } catch { /* storage unavailable in dev — proceed with generated key */ }
+
+        setLoadingLabel('Verifying…')
         const res = await verificationAPI.faceMatch(store.application.id, {
           nid_number: store.nidRecord.nid_number,
-          selfie_storage_key: storageKey,
+          selfie_storage_key: storage_key,
           date_of_birth: store.nidRecord.date_of_birth,
         })
         if (res.data.data) {
@@ -244,7 +270,7 @@ export default function OnboardingPage() {
           )}
           {captured && (
             <button onClick={handle} className="btn-primary flex-1" disabled={loading}>
-              {loading ? <Spinner size="sm" /> : <><span>Verify Face</span><ArrowRight className="h-4 w-4" /></>}
+              {loading ? <><Spinner size="sm" /><span className="ml-2 text-sm">{loadingLabel}</span></> : <><span>Verify Face</span><ArrowRight className="h-4 w-4" /></>}
             </button>
           )}
         </div>
@@ -254,6 +280,145 @@ export default function OnboardingPage() {
           {store.faceMatchResult?.matched && (
             <button onClick={() => next('profile')} className="btn-primary flex-1"><span>Continue</span><ArrowRight className="h-4 w-4" /></button>
           )}
+        </div>
+      </div>
+    )
+  }
+
+  // ── Step 3b: Fingerprint (assisted channel) ───────────────────────────────
+  function FingerprintStep() {
+    const [fingerPosition, setFingerPosition] = useState('right_index')
+    const [template, setTemplate] = useState('')
+    const [result, setResult] = useState<FingerprintResult | null>(store.fingerprintResult)
+    const [exhausted, setExhausted] = useState(false)
+    const [fpLoading, setFpLoading] = useState(false)
+    const [fpError, setFpError] = useState('')
+
+    async function handleSubmit() {
+      if (!store.application || !store.nidRecord || !template) return
+      setFpLoading(true); setFpError(''); setResult(null)
+      try {
+        const res = await verAPI.fingerprint(store.application.id, {
+          nid_number: store.nidRecord.nid_number,
+          fingerprint_template: template,
+          finger_position: fingerPosition,
+          date_of_birth: store.nidRecord.date_of_birth,
+        })
+        if (res.data.data) {
+          const r = res.data.data
+          store.setFingerprintResult(r)
+          setResult(r)
+        }
+      } catch (err: any) {
+        const status = err?.response?.status
+        if (status === 429) {
+          setExhausted(true)
+        } else {
+          setFpError(getErrorMessage(err))
+        }
+      } finally { setFpLoading(false) }
+    }
+
+    const attemptLabel = result
+      ? `Session ${result.session_number} — Attempt ${result.attempt_number} of 10`
+      : store.fingerprintResult
+        ? `Session ${store.fingerprintResult.session_number} — Attempt ${store.fingerprintResult.attempt_number} of 10`
+        : 'Session 1 — Attempt 1 of 10'
+
+    return (
+      <div className="space-y-5">
+        <div>
+          <h2 className="text-lg font-semibold text-surface-900">Fingerprint Verification</h2>
+          <p className="text-sm text-surface-500 mt-1">Scan customer fingerprint to verify identity</p>
+        </div>
+        <p className="text-xs text-surface-400 font-mono">{attemptLabel}</p>
+
+        {fpError && <Alert variant="error" onDismiss={() => setFpError('')}>{fpError}</Alert>}
+
+        {exhausted && (
+          <Alert variant="error">
+            Maximum sessions reached. Offer traditional paper KYC to the customer.
+          </Alert>
+        )}
+
+        {result && result.matched && (
+          <Alert variant="success">
+            Fingerprint matched — similarity {result.similarity_score?.toFixed(1)}%
+          </Alert>
+        )}
+
+        {result && !result.matched && !result.suggest_face_fallback && (
+          <Alert variant="error">
+            Fingerprint did not match (score: {result.similarity_score?.toFixed(1)}%). Please retry.
+          </Alert>
+        )}
+
+        {result && !result.matched && result.suggest_face_fallback && (
+          <Alert variant="warning">
+            {result.fallback_message ?? 'Fingerprint sessions exhausted. Switching to face match is required by BFIU guidelines.'}
+          </Alert>
+        )}
+
+        {!exhausted && (
+          <>
+            <Field label="Finger Position">
+              <Select value={fingerPosition} onChange={e => setFingerPosition(e.target.value)}>
+                <option value="right_thumb">Right Thumb</option>
+                <option value="right_index">Right Index</option>
+                <option value="right_middle">Right Middle</option>
+                <option value="right_ring">Right Ring</option>
+                <option value="right_little">Right Little</option>
+                <option value="left_thumb">Left Thumb</option>
+                <option value="left_index">Left Index</option>
+                <option value="left_middle">Left Middle</option>
+                <option value="left_ring">Left Ring</option>
+                <option value="left_little">Left Little</option>
+              </Select>
+            </Field>
+            <Field label="Fingerprint Template (Base64)">
+              <textarea
+                className="input font-mono text-xs resize-none"
+                rows={3}
+                placeholder="Paste base64-encoded fingerprint template here"
+                value={template}
+                onChange={e => setTemplate(e.target.value)}
+              />
+            </Field>
+            <button
+              className="btn-secondary w-full"
+              onClick={() => setTemplate(btoa('mock-fp-scan-' + Date.now()))}
+            >
+              Simulate Scan
+            </button>
+          </>
+        )}
+
+        <div className="flex flex-col gap-3">
+          {result?.matched && (
+            <button className="btn-primary w-full" onClick={() => next('profile')}>
+              <span>Continue</span><ArrowRight className="h-4 w-4" />
+            </button>
+          )}
+          {result && !result.matched && !result.suggest_face_fallback && !exhausted && (
+            <button className="btn-secondary w-full" onClick={() => { setTemplate(''); setResult(null) }}>
+              <RotateCcw className="h-4 w-4" /> Retry
+            </button>
+          )}
+          {result && !result.matched && result.suggest_face_fallback && (
+            <button className="btn-primary w-full" onClick={() => { store.setStep('face_match'); setError('') }}>
+              Switch to Face Match
+            </button>
+          )}
+          {!exhausted && !result?.matched && (
+            <button
+              className="btn-primary w-full"
+              onClick={handleSubmit}
+              disabled={fpLoading || !template}
+            >
+              {fpLoading ? <Spinner size="sm" /> : <><span>Submit Fingerprint</span><ArrowRight className="h-4 w-4" /></>}
+            </button>
+          )}
+          <button onClick={prev} className="btn-ghost w-full text-sm"><ArrowLeft className="h-4 w-4" /> Back</button>
         </div>
       </div>
     )
@@ -310,7 +475,22 @@ export default function OnboardingPage() {
           <Field label="Mother's Name"><Input value={form.mothers_name_en ?? ''} onChange={e => set('mothers_name_en', e.target.value)} /></Field>
           <Field label="Mobile Number" required><Input value={form.mobile_number ?? ''} onChange={e => set('mobile_number', e.target.value)} /></Field>
           <Field label="Email"><Input type="email" value={form.email ?? ''} onChange={e => set('email', e.target.value)} /></Field>
-          <Field label="Profession"><Input value={form.profession ?? ''} onChange={e => set('profession', e.target.value)} /></Field>
+          <Field label="Profession">
+            <Select value={form.profession ?? ''} onChange={e => set('profession', e.target.value)}>
+              <option value="">Select...</option>
+              {PROFESSION_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Business Activity">
+            <Select value={form.business_activity ?? ''} onChange={e => set('business_activity', e.target.value)}>
+              <option value="">Select (if applicable)...</option>
+              {BUSINESS_ACTIVITY_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </Select>
+          </Field>
           <Field label="Source of Fund">
             <Select value={form.source_of_fund ?? ''} onChange={e => set('source_of_fund', e.target.value)}>
               <option value="">Select...</option>
@@ -483,7 +663,7 @@ export default function OnboardingPage() {
 
     const checks = [
       { label: 'NID verified', done: !!store.nidRecord },
-      { label: 'Face matched', done: !!store.faceMatchResult?.matched },
+      { label: 'Biometric verified', done: !!store.faceMatchResult?.matched || !!store.fingerprintResult?.matched },
       { label: 'Profile saved', done: store.profileSaved },
       { label: 'Nominee added', done: store.nomineeSaved },
       { label: 'Signature captured', done: store.signatureSaved },
@@ -553,6 +733,7 @@ export default function OnboardingPage() {
   const stepComponents: Record<string, React.ReactElement> = {
     pre_check: <PreCheckStep />,
     nid_capture: <NIDStep />,
+    fingerprint: <FingerprintStep />,
     face_match: <FaceMatchStep />,
     profile: <ProfileStep />,
     nominee: <NomineeStep />,

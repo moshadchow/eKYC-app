@@ -13,6 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from app.core.config import settings
+from app.core.risk_tables import (
+    PROFESSION_SCORES,
+    PROFESSION_DEFAULT_SCORE,
+    BUSINESS_ACTIVITY_SCORES,
+    BUSINESS_DEFAULT_SCORE,
+    lookup_score,
+)
 from app.models.base import utcnow
 from app.models.compliance import (
     BeneficialOwner,
@@ -236,15 +243,30 @@ class CRUDCompliance:
 
         score_transparency = 1 if (profile and profile.source_of_fund) else 5
 
+        # BFIU Annexure-1 profession and business activity risk scoring
+        score_profession, matched_profession = lookup_score(
+            profile.profession if profile else None,
+            PROFESSION_SCORES,
+            PROFESSION_DEFAULT_SCORE,
+        )
+        score_business_activity, matched_business = lookup_score(
+            profile.business_activity if profile else None,
+            BUSINESS_ACTIVITY_SCORES,
+            BUSINESS_DEFAULT_SCORE,
+        )
+
         return {
             "score_onboarding_channel": score_channel,
             "score_geography": score_geo,
             "score_customer_type": score_customer,
             "score_product": score_product,
-            "score_business_activity": 3,
-            "score_profession": 3,
+            "score_business_activity": score_business_activity,
+            "score_profession": score_profession,
             "score_transaction_volume": score_txn,
             "score_transparency": score_transparency,
+            # Diagnostic keys - not persisted in DB, passed through to API response
+            "_matched_profession_category": matched_profession,
+            "_matched_business_category": matched_business,
         }
 
     async def get_latest_risk_score(
@@ -265,10 +287,13 @@ class CRUDCompliance:
         scores: dict,
         pep_check: Optional[PEPIPCheck] = None,
     ) -> RiskScore:
+        # Strip diagnostic keys (starting with "_") before DB insert
+        db_scores = {k: v for k, v in scores.items() if not k.startswith("_")}
+
         latest = await self.get_latest_risk_score(db, app_id)
         version = (latest.version + 1) if latest else 1
 
-        total = sum(scores.values())
+        total = sum(db_scores.values())
         risk_class = self.classify_risk(total)
         edd_required = (
             risk_class == RiskClassification.high
@@ -276,7 +301,7 @@ class CRUDCompliance:
         )
         rs = RiskScore(
             kyc_application_id=app_id,
-            **scores,
+            **db_scores,
             total_score=total,
             risk_classification=risk_class.value,
             edd_required=edd_required,

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ShieldCheck, ArrowRight, Phone, Mail } from 'lucide-react'
 import { authAPI } from '@/api/services'
 import { useAuthStore } from '@/store/authStore'
+import { useOnboardingStore } from '@/store/onboardingStore'
 import { getErrorMessage } from '@/api/client'
 import { Alert, OTPInput, Input, Field, Spinner } from '@/components/ui'
 
@@ -11,6 +12,7 @@ type Step = 'phone' | 'otp'
 export default function CustomerLoginPage() {
   const navigate = useNavigate()
   const { setCustomerTokens } = useAuthStore()
+  const resetOnboarding = useOnboardingStore(s => s.reset)
 
   const [step, setStep] = useState<Step>('phone')
   const [mobile, setMobile] = useState('')
@@ -51,6 +53,7 @@ export default function CustomerLoginPage() {
       const res = await authAPI.verifyOTP({ mobile_number: mobile, otp, device_fingerprint: 'web-browser' })
       if (res.data.success && res.data.data) {
         setCustomerTokens(res.data.data.access_token, res.data.data.refresh_token, mobile)
+        resetOnboarding()
         navigate('/onboarding')
       }
     } catch (err) {

@@ -1,0 +1,21 @@
+Collecting boto3
+  Downloading boto3-1.43.6-py3-none-any.whl (140 kB)
+     -------------------------------------- 140.5/140.5 kB 1.0 MB/s eta 0:00:00
+Collecting botocore<1.44.0,>=1.43.6
+  Downloading botocore-1.43.6-py3-none-any.whl (15.0 MB)
+     ---------------------------------------- 15.0/15.0 MB 2.2 MB/s eta 0:00:00
+Collecting jmespath<2.0.0,>=0.7.1
+  Downloading jmespath-1.1.0-py3-none-any.whl (20 kB)
+Collecting s3transfer<0.18.0,>=0.17.0
+  Downloading s3transfer-0.17.0-py3-none-any.whl (86 kB)
+     ---------------------------------------- 86.8/86.8 kB 2.5 MB/s eta 0:00:00
+Collecting python-dateutil<3.0.0,>=2.1
+  Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+     -------------------------------------- 229.9/229.9 kB 2.3 MB/s eta 0:00:00
+Requirement already satisfied: urllib3!=2.2.0,<3,>=1.25.4 in g:\installer\python313\lib\site-packages (from botocore<1.44.0,>=1.43.6->boto3) (2.6.3)
+Requirement already satisfied: six>=1.5 in g:\installer\python313\lib\site-packages (from python-dateutil<3.0.0,>=2.1->botocore<1.44.0,>=1.43.6->boto3) (1.17.0)
+Installing collected packages: python-dateutil, jmespath, botocore, s3transfer, boto3
+Successfully installed boto3-1.43.6 botocore-1.43.6 jmespath-1.1.0 python-dateutil-2.9.0.post0 s3transfer-0.17.0
+
+[notice] A new release of pip available: 22.3 -> 26.1.1
+[notice] To update, run: python.exe -m pip install --upgrade pip

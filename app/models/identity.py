@@ -52,7 +52,7 @@ class UserRead(UserBase):
 # ── otp_logs ──────────────────────────────────────────────────────────────────
 
 class OTPLogBase(SQLModel):
-    user_id: uuid.UUID = Field(foreign_key="users.id", index=True)
+    user_id: uuid.UUID = Field(index=True)  # stores user OR agent UUID — no FK constraint
     otp_hash: str = Field(max_length=128)
     purpose: str = Field(
         sa_column=sa.Column(sa.String(50), nullable=False),
@@ -83,7 +83,7 @@ class OTPLogCreate(OTPLogBase):
 # ── sessions ──────────────────────────────────────────────────────────────────
 
 class SessionBase(SQLModel):
-    user_id: uuid.UUID = Field(foreign_key="users.id", index=True)
+    user_id: uuid.UUID = Field(index=True)  # stores user OR agent UUID — no FK constraint
     jwt_token_hash: str = Field(max_length=128)
     ip_address: str = Field(max_length=45)
     device_fingerprint: Optional[str] = Field(default=None, max_length=255)
