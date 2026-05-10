@@ -3,7 +3,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.core.deps import CurrentAgent, CurrentUser, DBSession
@@ -191,6 +191,45 @@ async def submit_application(
 
 
 # ── Agent endpoints ───────────────────────────────────────────────────────────
+
+@router.put("/applications/agent/{app_id}/profile", response_model=APIResponse[dict])
+async def agent_save_customer_profile(
+    app_id: uuid.UUID, body: CustomerProfileRequest, request: Request,
+    current_agent: CurrentAgent, db: DBSession,
+):
+    """Phase 4: Agent saves profile on behalf of customer."""
+    app = await crud_application.get_by_id(db, app_id)
+    if app.agent_id != current_agent.id:
+        raise HTTPException(status_code=403, detail="Not assigned to this application")
+    profile = await crud_application.upsert_profile(
+        db, app_id, app.user_id, app.status,
+        body.model_dump(exclude_none=True),
+    )
+    await record_event(
+        db, actor_id=str(current_agent.id), actor_type=ActorType.agent,
+        action=AuditAction.update, entity_type="customer_profiles", entity_id=str(profile.id),
+        ip_address=request.client.host if request.client else None,
+    )
+    return APIResponse(message="Profile saved by agent", data={"profile_id": str(profile.id)})
+
+
+@router.post("/applications/agent/{app_id}/submit", response_model=APIResponse[ApplicationRead])
+async def agent_submit_application(
+    app_id: uuid.UUID, request: Request, current_agent: CurrentAgent, db: DBSession,
+):
+    """Phase 4: Agent submits the assisted application."""
+    app = await crud_application.get_by_id(db, app_id)
+    if app.agent_id != current_agent.id:
+        raise HTTPException(status_code=403, detail="Not assigned to this application")
+    app = await crud_application.submit(db, app, require_signature=False)
+    await record_event(
+        db, actor_id=str(current_agent.id), actor_type=ActorType.agent,
+        action=AuditAction.update, entity_type="kyc_applications", entity_id=str(app.id),
+        new_value={"status": "submitted"},
+        ip_address=request.client.host if request.client else None,
+    )
+    return APIResponse(message="Application submitted by agent", data=_to_read(app))
+
 
 @router.post("/applications/agent/create", response_model=APIResponse[ApplicationRead])
 async def agent_create_application(

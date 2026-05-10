@@ -18,6 +18,7 @@ interface OnboardingState {
   currentStep: OnboardingStep
   preCheckResult: PreCheckResult | null
   application: ApplicationRead | null
+  customerMobile: string | null
   nidRecord: NIDRecord | null
   faceMatchResult: FaceMatchResult | null
   fingerprintResult: FingerprintResult | null
@@ -30,9 +31,11 @@ interface OnboardingState {
   setStep:                (step: OnboardingStep) => void
   setPreCheckResult:      (r: PreCheckResult) => void
   setApplication:         (a: ApplicationRead) => void
+  setCustomerMobile:       (m: string) => void
   setNIDRecord:           (n: NIDRecord) => void
   setFaceMatchResult:     (f: FaceMatchResult) => void
   setFingerprintResult:   (r: FingerprintResult) => void
+  clearFingerprintResult: () => void
   setOnboardingChannel:   (channel: OnboardingChannelValue) => void
   setVerificationStatus:  (v: VerificationStatus) => void
   markProfileSaved:       () => void
@@ -45,6 +48,7 @@ const initial = {
   currentStep: 'pre_check' as OnboardingStep,
   preCheckResult: null,
   application: null,
+  customerMobile: null,
   nidRecord: null,
   faceMatchResult: null,
   fingerprintResult: null,
@@ -62,15 +66,30 @@ export const useOnboardingStore = create<OnboardingState>()(
       setStep:               (step) => set({ currentStep: step }),
       setPreCheckResult:     (r)    => set({ preCheckResult: r }),
       setApplication:        (a)    => set({ application: a }),
+      setCustomerMobile:     (m)    => set({ customerMobile: m }),
       setNIDRecord:          (n)    => set({ nidRecord: n }),
       setFaceMatchResult:    (f)    => set({ faceMatchResult: f }),
       setFingerprintResult:  (r)    => set({ fingerprintResult: r }),
+      clearFingerprintResult: ()    => set({ fingerprintResult: null }),
       setOnboardingChannel:  (ch)   => set({ onboardingChannel: ch }),
       setVerificationStatus: (v)    => set({ verificationStatus: v }),
       markProfileSaved:      ()     => set({ profileSaved: true }),
       markNomineeSaved:      ()     => set({ nomineeSaved: true }),
       markSignatureSaved:    ()     => set({ signatureSaved: true }),
-      reset:                 ()     => set(initial),
+      reset:                 ()     => set({
+    currentStep: 'pre_check' as OnboardingStep,
+    preCheckResult: null,
+    application: null,
+    customerMobile: null,
+    nidRecord: null,
+    faceMatchResult: null,
+    fingerprintResult: null,
+    onboardingChannel: null,
+    verificationStatus: null,
+    profileSaved: false,
+    nomineeSaved: false,
+    signatureSaved: false,
+  }),
     }),
     { name: 'ekyc-onboarding' }
   )

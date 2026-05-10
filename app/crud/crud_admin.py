@@ -30,6 +30,7 @@ from app.models.enums import (
     RiskClassification,
 )
 from app.models.onboarding import BiometricVerification, CustomerProfile, KYCApplication
+from app.models.identity import User
 from app.models.workflow import (
     Account,
     ApprovalDecision,
@@ -333,13 +334,22 @@ class CRUDAdmin:
             status=RefreshStatus.scheduled.value,
         )
         db.add(schedule)
+        await db.flush()
+
+        # Look up user for real notification address
+        user_result = await db.execute(
+            select(User).where(User.id == app.user_id)
+        )
+        user = user_result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found for notification")
 
         notif = Notification(
             user_id=app.user_id,
             kyc_application_id=app.id,
             channel=NotificationChannel.sms.value,
             notification_type=NotificationType.account_activation.value,
-            recipient_address="PENDING",
+            recipient_address=user.mobile_number,
             message_body=(
                 f"Your account {account_num} has been activated. "
                 f"Reference: {app.application_ref}"

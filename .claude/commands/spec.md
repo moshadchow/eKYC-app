@@ -2,7 +2,7 @@ Generate a detailed feature specification for the eKYC onboarding platform and s
 
 **Argument received:** `$ARGUMENTS`
 
-Parse the argument as `{step_number} {feature_name}` — e.g., `2 registration` means Step 2, feature "registration".
+Parse the argument as `{step_number} {feature_name}` — e.g., `2 registration` means Step 2 and  feature "registration".
 
 ---
 

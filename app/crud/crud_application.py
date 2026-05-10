@@ -95,7 +95,8 @@ class CRUDApplication:
         return list(result.scalars().all())
 
     async def submit(
-        self, db: AsyncSession, app: KYCApplication
+        self, db: AsyncSession, app: KYCApplication,
+        require_signature: bool = True,
     ) -> KYCApplication:
         """Validate pre-conditions and move draft → submitted."""
         if app.status != ApplicationStatus.draft.value:
@@ -105,10 +106,16 @@ class CRUDApplication:
             )
         await self._assert_profile_exists(db, app.id)
         await self._assert_biometric_verified(db, app.id)
-        await self._assert_signature_captured(db, app.id)
+        if require_signature:
+            await self._assert_signature_captured(db, app.id)
 
         app.status = ApplicationStatus.submitted.value
         app.submitted_at = utcnow()
+        await db.flush()
+
+        from app.crud.crud_admin import crud_admin
+        await crud_admin.get_or_create_queue_entry(db, app)
+
         return app
 
     async def get_customer_by_mobile(

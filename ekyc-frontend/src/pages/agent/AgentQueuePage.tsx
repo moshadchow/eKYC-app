@@ -2,10 +2,10 @@ import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { Eye, UserCheck, AlertTriangle, Clock, CheckCircle2, XCircle, Filter, RefreshCw } from 'lucide-react'
-import { adminAPI, complianceAPI } from '@/api/services'
+import { adminAPI } from '@/api/services'
 import { getErrorMessage } from '@/api/client'
 import { Card, StatusBadge, Alert, Spinner, Modal, Select, EmptyState, SkeletonCard } from '@/components/ui'
-import type { QueueEntry, ReviewSummary, DecisionRequest } from '@/types/api'
+import type { QueueEntry, DecisionRequest } from '@/types/api'
 
 export default function AgentQueuePage() {
   const navigate = useNavigate()
@@ -24,12 +24,6 @@ export default function AgentQueuePage() {
     queryKey: ['queue', queueTypeFilter, statusFilter, page],
     queryFn: () => adminAPI.listQueue({ queue_type: queueTypeFilter || undefined, status: statusFilter || undefined, page }).then(r => r.data),
     refetchInterval: 30_000,
-  })
-
-  const { data: summary, isLoading: summaryLoading } = useQuery({
-    queryKey: ['review-summary', selectedApp],
-    queryFn: () => selectedApp ? adminAPI.reviewSummary(selectedApp).then(r => r.data.data) : null,
-    enabled: !!selectedApp,
   })
 
   const decideMutation = useMutation({
@@ -148,7 +142,7 @@ export default function AgentQueuePage() {
                       <div className="flex gap-2">
                         <button
                           className="btn-secondary btn-sm"
-                          onClick={() => setSelectedApp(entry.app_id)}
+                          onClick={() => navigate(`/agent/compliance/${entry.app_id}`)}
                         >
                           <Eye className="h-3.5 w-3.5" /> Review
                         </button>
@@ -180,21 +174,6 @@ export default function AgentQueuePage() {
           </div>
         )}
       </Card>
-
-      {/* Review Summary Panel */}
-      {selectedApp && !decisionModal && (
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-5">
-            <h3 className="section-title mb-0">Review Summary</h3>
-            <button onClick={() => setSelectedApp(null)} className="btn-ghost btn-sm">Close</button>
-          </div>
-          {summaryLoading ? (
-            <div className="flex justify-center py-8"><Spinner size="lg" /></div>
-          ) : summary ? (
-            <ReviewSummaryPanel summary={summary} onDecide={() => setDecisionModal(true)} onActivate={() => activateMutation.mutate(selectedApp)} isActivating={activateMutation.isPending} />
-          ) : null}
-        </Card>
-      )}
 
       {/* Decision Modal */}
       <Modal open={decisionModal} onClose={() => setDecisionModal(false)} title="Make Decision"
@@ -230,56 +209,6 @@ export default function AgentQueuePage() {
           </div>
         </div>
       </Modal>
-    </div>
-  )
-}
-
-function ReviewSummaryPanel({ summary, onDecide, onActivate, isActivating }: {
-  summary: ReviewSummary; onDecide: () => void; onActivate: () => void; isActivating: boolean
-}) {
-  const checks = [
-    { label: 'Biometric verified', pass: summary.biometric_verified },
-    { label: 'Screening clear', pass: summary.screening_clear },
-    { label: 'PEP/IP flagged', pass: !summary.pep_ip_flagged, inverted: true },
-    { label: 'EDD required', pass: !summary.edd_required, inverted: true },
-  ]
-  const allClear = checks.every(c => c.pass)
-
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
-        <div><span className="text-surface-500">Customer</span><br /><span className="font-medium">{summary.customer_name ?? '—'}</span></div>
-        <div><span className="text-surface-500">NID</span><br /><span className="font-mono text-xs">{summary.nid_number ?? '—'}</span></div>
-        <div><span className="text-surface-500">KYC Type</span><br /><StatusBadge status={summary.kyc_type} /></div>
-        <div><span className="text-surface-500">Status</span><br /><StatusBadge status={summary.status} /></div>
-        <div><span className="text-surface-500">Risk Score</span><br />
-          {summary.risk_score !== null ? (
-            <span className="font-semibold">{summary.risk_score} — <StatusBadge status={summary.risk_classification ?? ''} /></span>
-          ) : '—'}
-        </div>
-        <div><span className="text-surface-500">Ref</span><br /><span className="font-mono text-xs">{summary.application_ref}</span></div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        {checks.map(c => (
-          <div key={c.label} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${c.pass ? 'bg-success-light text-success-dark' : 'bg-danger-light text-danger-dark'}`}>
-            {c.pass ? <CheckCircle2 className="h-4 w-4 flex-shrink-0" /> : <XCircle className="h-4 w-4 flex-shrink-0" />}
-            {c.label}
-          </div>
-        ))}
-      </div>
-
-      <div className="flex gap-3">
-        {summary.status === 'approved' ? (
-          <button onClick={onActivate} className="btn-primary flex-1" disabled={isActivating}>
-            {isActivating ? <Spinner size="sm" /> : <><CheckCircle2 className="h-4 w-4" /> Activate Account</>}
-          </button>
-        ) : (
-          <button onClick={onDecide} className="btn-primary flex-1" disabled={!allClear && summary.status !== 'submitted'}>
-            <UserCheck className="h-4 w-4" /> Make Decision
-          </button>
-        )}
-      </div>
     </div>
   )
 }

@@ -155,6 +155,7 @@ class CRUDVerification:
             ),
         )
         db.add(verification)
+        await db.flush()
         return verification
 
     # ── Fingerprint match ─────────────────────────────────────────────────────
@@ -206,6 +207,7 @@ class CRUDVerification:
             ),
         )
         db.add(verification)
+        await db.flush()
         return verification, suggest_face_fallback
 
     # ── Verification status ───────────────────────────────────────────────────

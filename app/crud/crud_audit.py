@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from app.models.base import utcnow
-from app.models.enums import RefreshEventType, RefreshStatus, RiskClassification
-from app.models.workflow import Account, AuditLog, KYCRefreshEvent, KYCRefreshSchedule
+from app.models.enums import NotificationChannel, NotificationStatus, NotificationType, RefreshEventType, RefreshStatus, RiskClassification
+from app.models.workflow import Account, AuditLog, KYCRefreshEvent, KYCRefreshSchedule, Notification
 
 
 class CRUDAudit:
@@ -229,6 +229,26 @@ class CRUDLifecycle:
             event_type=RefreshEventType.reminder_sent.value,
             notes=f"Reminder #{schedule.reminder_count} sent by agent {agent_employee_id}",
         ))
+
+        # Also write a Notification record for the dispatcher to send
+        from app.models.identity import User
+        user_result = await db.execute(select(User).where(User.id == schedule.user_id))
+        user = user_result.scalar_one_or_none()
+        recipient = user.mobile_number if user else ""
+
+        notif = Notification(
+            user_id=schedule.user_id,
+            kyc_application_id=None,
+            channel=NotificationChannel.sms.value,
+            notification_type=NotificationType.kyc_refresh_reminder.value,
+            recipient_address=recipient,
+            message_body=(
+                f"Your KYC review is due. Please complete your periodic KYC update. "
+                f"Reminder #{schedule.reminder_count}."
+            ),
+            status=NotificationStatus.pending.value,
+        )
+        db.add(notif)
         return schedule
 
 

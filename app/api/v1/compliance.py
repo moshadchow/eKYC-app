@@ -195,12 +195,14 @@ async def get_edd_status(
 ):
     from app.models.base import utcnow
     edd = await crud_compliance.get_latest_edd_request(db, app_id)
+    docs = await crud_compliance.list_edd_documents(db, edd.id)
     return APIResponse(data={
         "edd_id": str(edd.id), "status": edd.status,
         "trigger_reason": edd.trigger_reason,
         "deadline_at": str(edd.deadline_at),
         "days_remaining": max(0, (edd.deadline_at - utcnow()).days),
         "responded_at": str(edd.responded_at) if edd.responded_at else None,
+        "uploaded_documents": [{"document_type": d.document_type, "storage_key": d.storage_key, "checksum_sha256": d.checksum_sha256, "uploaded_at": str(d.uploaded_at)} for d in docs],
     })
 
 

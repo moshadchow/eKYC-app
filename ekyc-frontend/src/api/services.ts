@@ -9,6 +9,7 @@ import type {
   ScreeningResultItem, PEPCheckRequest, RiskScoreRequest, RiskScoreResult,
   EDDRequestResult, EDDStatus_t, QueueEntry, ReviewSummary,
   DecisionRequest, AccountActivated, RefreshSchedule, ScheduleListItem,
+  NotificationRead,
 } from '@/types/api'
 
 // ── Auth — Customer ───────────────────────────────────────────────────────────
@@ -43,6 +44,10 @@ export const applicationsAPI = {
   submit:         (appId: string)                                => apiClient.post<APIResponse<ApplicationRead>>(`/kyc/applications/${appId}/submit`),
   agentCreate:    (body: CreateApplicationRequest, customerMobile: string) =>
     apiClient.post<APIResponse<ApplicationRead>>('/kyc/applications/agent/create', body, { params: { customer_mobile: customerMobile } }),
+  agentSaveProfile: (appId: string, body: CustomerProfileRequest) =>
+    apiClient.put<APIResponse<{ profile_id: string }>>(`/kyc/applications/agent/${appId}/profile`, body),
+  agentSubmit:    (appId: string) =>
+    apiClient.post<APIResponse<ApplicationRead>>(`/kyc/applications/agent/${appId}/submit`),
 }
 
 // ── Verification ──────────────────────────────────────────────────────────────
@@ -108,4 +113,14 @@ export const lifecycleAPI = {
     apiClient.get<PaginatedResponse<ScheduleListItem>>('/lifecycle/accounts', { params }),
   sendReminder: (accountId: string)                        =>
     apiClient.post<APIResponse<{ schedule_id: string; reminder_count: number; last_reminder_at: string }>>(`/lifecycle/accounts/${accountId}/reminder`),
+}
+
+// ── Notifications ───────────────────────────────────────────────────────────────
+export const notificationAPI = {
+  listByUser: (params?: { status?: string; page?: number; page_size?: number }) =>
+    apiClient.get<PaginatedResponse<NotificationRead>>('/notifications/me', { params }),
+  listAll: (params?: { status?: string; notification_type?: string; channel?: string; user_id?: string; page?: number; page_size?: number }) =>
+    apiClient.get<PaginatedResponse<NotificationRead>>('/notifications', { params }),
+  retry: (notifId: string) =>
+    apiClient.post<APIResponse<NotificationRead>>(`/notifications/${notifId}/retry`),
 }

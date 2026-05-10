@@ -39,7 +39,7 @@ export type NomineeRelation = 'spouse' | 'son' | 'daughter' | 'father' | 'mother
 export type ScreenType = 'un_sanctions' | 'internal_blacklist' | 'adverse_media'
 export type ScreenResult = 'clear' | 'potential_match' | 'confirmed_match' | 'requires_review'
 export type RiskClassification = 'low' | 'medium' | 'high'
-export type EDDStatus = 'pending' | 'documents_received' | 'under_review' | 'completed' | 'expired'
+export type EDDStatus = 'in_progress' | 'pending' | 'documents_received' | 'under_review' | 'completed' | 'expired'
 export type EDDTriggerReason = 'high_risk_score' | 'pep_match' | 'ip_match' | 'sanctions_match' | 'adverse_media' | 'manual_override' | 'risk_upgrade'
 export type QueueType = 'standard' | 'high_risk' | 'failed_verification' | 'edd_pending'
 export type QueueStatus = 'unassigned' | 'in_review' | 'completed' | 'escalated'
@@ -285,6 +285,13 @@ export interface EDDRequestResult {
   required_documents: string[]
 }
 
+export interface EDDDocument {
+  document_type: string
+  storage_key: string
+  checksum_sha256: string
+  uploaded_at?: string
+}
+
 export interface EDDStatus_t {
   edd_id: string
   status: EDDStatus
@@ -292,6 +299,7 @@ export interface EDDStatus_t {
   deadline_at: string
   days_remaining: number
   responded_at: string | null
+  uploaded_documents?: EDDDocument[]
 }
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
@@ -359,4 +367,22 @@ export interface ScheduleListItem {
   is_overdue: boolean
   reminder_count: number
   last_reminder_at: string | null
+}
+
+// ── Notifications ──────────────────────────────────────────────────────────────
+export interface NotificationRead {
+  id: string
+  user_id: string
+  kyc_application_id: string | null
+  channel: 'sms' | 'email' | 'push'
+  notification_type: string
+  recipient_address: string
+  message_body: string
+  status: 'pending' | 'sent' | 'delivered' | 'failed'
+  retry_count: number
+  gateway_message_id: string | null
+  sent_at: string | null
+  delivered_at: string | null
+  error_message: string | null
+  created_at: string
 }

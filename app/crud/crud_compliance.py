@@ -332,7 +332,7 @@ class CRUDCompliance:
             required_documents=(
                 '["bank_statement","income_proof","source_of_fund_declaration"]'
             ),
-            status=EDDStatus.pending.value,
+            status=EDDStatus.in_progress.value,
             deadline_at=utcnow() + timedelta(days=settings.EDD_DEADLINE_DAYS),
         )
         db.add(edd)
@@ -380,11 +380,24 @@ class CRUDCompliance:
         )
         db.add(doc)
 
-        if edd.status == EDDStatus.pending.value:
+        if edd.status == EDDStatus.in_progress.value:
             edd.status = EDDStatus.documents_received.value
             edd.responded_at = utcnow()
 
         return doc
+
+
+async def list_edd_documents(
+        self,
+        db: AsyncSession,
+        edd_id: uuid.UUID,
+    ) -> list[EDDDocument]:
+        result = await db.execute(
+            select(EDDDocument)
+            .where(EDDDocument.edd_request_id == edd_id)
+            .order_by(EDDDocument.uploaded_at.asc())
+        )
+        return list(result.scalars().all())
 
 
 crud_compliance = CRUDCompliance()

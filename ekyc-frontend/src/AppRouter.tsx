@@ -15,12 +15,14 @@ import AgentQueuePage from '@/pages/agent/AgentQueuePage'
 import CompliancePage from '@/pages/agent/CompliancePage'
 import AgentOnboardingPage from '@/pages/agent/AgentOnboardingPage'
 
+// Customer
+import CustomerLifecyclePage from '@/pages/customer/CustomerLifecyclePage'
+import NotificationHistoryPage from '@/pages/customer/NotificationHistoryPage'
+
 // Admin
 import AuditPage from '@/pages/admin/AuditPage'
 import LifecyclePage from '@/pages/admin/LifecyclePage'
-
-// Customer
-import CustomerLifecyclePage from '@/pages/customer/CustomerLifecyclePage'
+import NotificationQueuePage from '@/pages/admin/NotificationQueuePage'
 
 function RequireAuth({ children, role }: { children: React.ReactElement; role?: 'customer' | 'agent' }) {
   const { isAuthenticated, actorType } = useAuthStore()
@@ -49,6 +51,7 @@ export default function AppRouter() {
       <Route element={<RequireAuth role="customer"><AppShell /></RequireAuth>}>
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route path="/lifecycle" element={<CustomerLifecyclePage />} />
+        <Route path="/notifications" element={<NotificationHistoryPage />} />
       </Route>
 
       {/* Agent */}
@@ -60,6 +63,7 @@ export default function AppRouter() {
         <Route path="/admin/queue" element={<AgentQueuePage />} />
         <Route path="/admin/audit" element={<AuditPage />} />
         <Route path="/admin/lifecycle" element={<LifecyclePage />} />
+        <Route path="/admin/notifications" element={<NotificationQueuePage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

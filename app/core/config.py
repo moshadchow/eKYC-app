@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     STORAGE_ACCESS_KEY: str = "minioadmin"
     STORAGE_SECRET_KEY: str = "minioadmin"
 
+    # Notification gateway
+    NOTIFICATION_MOCK: bool = True
+    SMS_GATEWAY_URL: str = ""
+    SMS_API_KEY: str = ""
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+
     class Config:
         env_file = ".env"
         case_sensitive = True

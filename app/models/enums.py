@@ -147,6 +147,7 @@ class EDDTriggerReason(str, Enum):
 
 class EDDStatus(str, Enum):
     pending = "pending"
+    in_progress = "in_progress"
     documents_received = "documents_received"
     under_review = "under_review"
     completed = "completed"

@@ -43,8 +43,10 @@ export default function AgentOnboardingPage() {
           mobile
         )
         if (res.data.data) {
+          store.reset()
           store.setApplication(res.data.data)
           store.setOnboardingChannel('assisted')
+          store.setCustomerMobile(mobile)
           setAppId(res.data.data.id)
           setCustomerMobile(mobile)
           setStep('nid')
@@ -130,14 +132,22 @@ export default function AgentOnboardingPage() {
   function FingerprintStep() {
     const [fingerPosition, setFingerPosition] = useState('right_index')
     const [template, setTemplate] = useState('')
-    const [result, setResult] = useState<FingerprintResult | null>(null)
     const [exhausted, setExhausted] = useState(false)
     const [fpLoading, setFpLoading] = useState(false)
     const [fpError, setFpError] = useState('')
 
+    // Use store result so it survives parent re-renders
+    const result = store.fingerprintResult
+
+    function clearScan() {
+      setTemplate('')
+      store.clearFingerprintResult()
+    }
+
     async function handleSubmit() {
       if (!appId || !store.nidRecord || !template) return
-      setFpLoading(true); setFpError(''); setResult(null)
+      setFpLoading(true); setFpError('')
+      store.clearFingerprintResult()
       try {
         const res = await verificationAPI.fingerprint(appId, {
           nid_number: store.nidRecord.nid_number,
@@ -146,9 +156,7 @@ export default function AgentOnboardingPage() {
           date_of_birth: store.nidRecord.date_of_birth,
         })
         if (res.data.data) {
-          const r = res.data.data
-          store.setFingerprintResult(r)
-          setResult(r)
+          store.setFingerprintResult(res.data.data)
         }
       } catch (err: any) {
         if (err?.response?.status === 429) {
@@ -197,7 +205,7 @@ export default function AgentOnboardingPage() {
           </Alert>
         )}
 
-        {!exhausted && (
+        {!exhausted && !result?.matched && (
           <>
             <Field label="Finger Position">
               <Select value={fingerPosition} onChange={e => setFingerPosition(e.target.value)}>
@@ -222,23 +230,32 @@ export default function AgentOnboardingPage() {
                 onChange={e => setTemplate(e.target.value)}
               />
             </Field>
-            <button
-              className="btn-secondary w-full"
-              onClick={() => setTemplate(btoa('mock-fp-scan-' + Date.now()))}
-            >
-              Simulate Scan
-            </button>
+            <div className="flex gap-3">
+              <button
+                className="btn-secondary flex-1"
+                onClick={() => setTemplate(btoa('mock-fp-scan-' + Date.now()))}
+              >
+                Simulate Scan
+              </button>
+              <button
+                className="btn-secondary flex-1"
+                onClick={clearScan}
+                disabled={!template}
+              >
+                <RotateCcw className="h-4 w-4" /> Clear
+              </button>
+            </div>
           </>
         )}
 
         <div className="flex flex-col gap-3">
           {result?.matched && (
             <button className="btn-primary w-full" onClick={() => setStep('profile')}>
-              <span>Continue</span><ArrowRight className="h-4 w-4" />
+              <span>Continue to Profile</span><ArrowRight className="h-4 w-4" />
             </button>
           )}
           {result && !result.matched && !result.suggest_face_fallback && !exhausted && (
-            <button className="btn-secondary w-full" onClick={() => { setTemplate(''); setResult(null) }}>
+            <button className="btn-secondary w-full" onClick={clearScan}>
               <RotateCcw className="h-4 w-4" /> Retry
             </button>
           )}
@@ -388,7 +405,7 @@ export default function AgentOnboardingPage() {
     const nid = store.nidRecord
     const [form, setForm] = useState<Partial<CustomerProfileRequest>>({
       full_name_en: nid?.full_name_en ?? '',
-      mobile_number: '',
+      mobile_number: store.customerMobile ?? '',
       profession: '',
       source_of_fund: undefined,
       nationality: 'Bangladeshi',
@@ -398,13 +415,21 @@ export default function AgentOnboardingPage() {
 
     function setField(k: keyof CustomerProfileRequest, v: any) { setForm(f => ({ ...f, [k]: v })) }
 
+    const biometricVerified =
+      store.fingerprintResult?.matched === true ||
+      store.faceMatchResult?.matched === true
+
     async function handle() {
       if (!appId) return
+      if (!biometricVerified) {
+        setError('Biometric verification is required. Please go back and complete fingerprint or face verification.')
+        return
+      }
       setLoading(true); setError('')
       try {
-        await applicationsAPI.saveProfile(appId, form as CustomerProfileRequest)
+        await applicationsAPI.agentSaveProfile(appId, form as CustomerProfileRequest)
         store.markProfileSaved()
-        await applicationsAPI.submit(appId)
+        await applicationsAPI.agentSubmit(appId)
         setStep('submitted')
       } catch (err) { setError(getErrorMessage(err)) }
       finally { setLoading(false) }
@@ -416,6 +441,23 @@ export default function AgentOnboardingPage() {
           <h2 className="text-lg font-semibold text-surface-900">Customer Profile</h2>
           <p className="text-sm text-surface-500 mt-1">Complete the required profile fields</p>
         </div>
+
+        {store.fingerprintResult?.matched && (
+          <Alert variant="success">
+            Fingerprint verified — similarity {store.fingerprintResult.similarity_score?.toFixed(1)}%
+          </Alert>
+        )}
+        {store.faceMatchResult?.matched && (
+          <Alert variant="success">
+            Face matched — similarity {store.faceMatchResult.similarity_score?.toFixed(1)}%
+          </Alert>
+        )}
+        {!biometricVerified && (
+          <Alert variant="error">
+            Biometric verification not completed. Please go back and verify fingerprint or face.
+          </Alert>
+        )}
+
         {error && <Alert variant="error" onDismiss={() => setError('')}>{error}</Alert>}
 
         <Field label="Full Name (English)" required>
@@ -459,7 +501,7 @@ export default function AgentOnboardingPage() {
           <button
             onClick={handle}
             className="btn-primary flex-1"
-            disabled={loading || !form.full_name_en || !form.mobile_number}
+            disabled={loading || !form.full_name_en || !form.mobile_number || !biometricVerified}
           >
             {loading ? <Spinner size="sm" /> : <><span>Save & Submit</span><ArrowRight className="h-4 w-4" /></>}
           </button>

@@ -302,6 +302,11 @@ class NotificationCreate(NotificationBase):
 class NotificationRead(NotificationBase):
     id: uuid.UUID
     created_at: datetime
+    error_message: Optional[str] = None
+    gateway_response: Optional[str] = None
+
+    class Config:
+        arbitrary_types_allowed = True
 
 
 # ── kyc_refresh_schedules ─────────────────────────────────────────────────────
