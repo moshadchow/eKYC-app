@@ -2,12 +2,13 @@ import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Activity, Search } from 'lucide-react'
 import { auditAPI } from '@/api/services'
-import { Card, Spinner, StatusBadge, EmptyState } from '@/components/ui'
+import { Card, Spinner, StatusBadge, EmptyState, AuditTrailModal } from '@/components/ui'
 
 export default function AuditPage() {
   const [page, setPage] = useState(1)
   const [entityType, setEntityType] = useState('')
   const [action, setAction] = useState('')
+  const [selectedEntity, setSelectedEntity] = useState<{type: string; id: string} | null>(null)
 
   const { data, isLoading } = useQuery({
     queryKey: ['audit-logs', entityType, action, page],
@@ -80,7 +81,10 @@ export default function AuditPage() {
                     </td>
                     <td className="px-5 py-3"><StatusBadge status={l.action} /></td>
                     <td className="px-5 py-3 text-xs text-surface-600">{l.entity_type?.replace(/_/g, ' ')}</td>
-                    <td className="px-5 py-3 font-mono text-xs text-surface-400">{l.entity_id?.slice(-8) ?? '—'}</td>
+                    <td className="px-5 py-3 font-mono text-xs text-brand-600 cursor-pointer hover:underline"
+                        onClick={() => setSelectedEntity({ type: l.entity_type, id: l.entity_id })}>
+                        {l.entity_id?.slice(-8) ?? '—'}
+                      </td>
                     <td className="px-5 py-3 text-xs text-surface-400">{l.ip_address ?? '—'}</td>
                   </tr>
                 ))}
@@ -99,6 +103,16 @@ export default function AuditPage() {
           </div>
         )}
       </Card>
+
+      {/* Entity Drill-down Modal */}
+      {selectedEntity && (
+        <AuditTrailModal
+          entityType={selectedEntity.type}
+          entityId={selectedEntity.id}
+          open={!!selectedEntity}
+          onClose={() => setSelectedEntity(null)}
+        />
+      )}
     </div>
   )
 }

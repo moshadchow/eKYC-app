@@ -29,7 +29,7 @@ from app.models.enums import (
     RefreshStatus,
     RiskClassification,
 )
-from app.models.onboarding import BiometricVerification, CustomerProfile, KYCApplication
+from app.models.onboarding import BiometricVerification, CustomerProfile, KYCApplication, KYCDocument
 from app.models.identity import User
 from app.models.workflow import (
     Account,
@@ -209,6 +209,15 @@ class CRUDAdmin:
             "risk_score": rs.total_score if rs else None,
             "edd_required": bool(rs and rs.edd_required),
         }
+
+    async def get_documents(
+        self, db: AsyncSession, app_id: uuid.UUID
+    ) -> list[KYCDocument]:
+        """Get all documents for a KYC application."""
+        result = await db.execute(
+            select(KYCDocument).where(KYCDocument.kyc_application_id == app_id)
+        )
+        return list(result.scalars().all())
 
     # ── Decision ──────────────────────────────────────────────────────────────
 

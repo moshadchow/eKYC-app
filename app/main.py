@@ -22,6 +22,7 @@ from app.api.v1.compliance import router as compliance_router
 from app.api.v1.pre_check import router as pre_check_router
 from app.api.v1.verification import router as verification_router
 from app.api.v1.notifications import router as notifications_router
+from app.api.v1.storage import router as storage_router
 from app.core.config import settings
 
 
@@ -91,6 +92,7 @@ compliant with **BFIU e-KYC Guidelines** (Circular No. 29, March 2026).
     app.include_router(audit_router, prefix=PREFIX)
     app.include_router(lifecycle_router, prefix=PREFIX)
     app.include_router(notifications_router, prefix=PREFIX)
+    app.include_router(storage_router, prefix="/storage", tags=["Storage"])
 
     @app.get("/", include_in_schema=False)
     async def root():

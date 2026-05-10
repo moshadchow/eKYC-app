@@ -25,3 +25,12 @@ def generate_presigned_put(key: str, content_type: str, expires: int = 300) -> s
         Params={"Bucket": settings.STORAGE_BUCKET, "Key": key, "ContentType": content_type},
         ExpiresIn=expires,
     )
+
+
+def generate_presigned_get(key: str, expires: int = 300) -> str:
+    """Generate a presigned URL for reading an object from S3."""
+    return get_storage_client().generate_presigned_url(
+        "get_object",
+        Params={"Bucket": settings.STORAGE_BUCKET, "Key": key},
+        ExpiresIn=expires,
+    )

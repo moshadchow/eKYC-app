@@ -7,9 +7,9 @@ import type {
   NomineeRequest, SignatureRequest, NIDVerifyRequest, NIDRecord,
   FaceMatchRequest, FaceMatchResult, FingerprintResult, SelfieUploadUrlResponse, DocumentUploadRequest, VerificationStatus,
   ScreeningResultItem, PEPCheckRequest, RiskScoreRequest, RiskScoreResult,
-  EDDRequestResult, EDDStatus_t, QueueEntry, ReviewSummary,
+  EDDRequestResult, EDDStatus_t, QueueEntry, ReviewSummary, ApplicationDocument,
   DecisionRequest, AccountActivated, RefreshSchedule, ScheduleListItem,
-  NotificationRead,
+  NotificationRead, PresignedGetResponse,
 } from '@/types/api'
 
 // ── Auth — Customer ───────────────────────────────────────────────────────────
@@ -93,6 +93,7 @@ export const adminAPI = {
   listQueue:      (params?: { queue_type?: string; status?: string; page?: number }) => apiClient.get<PaginatedResponse<QueueEntry>>('/admin/queue', { params }),
   assignQueue:    (entryId: string, body: { maker_id?: string; checker_id?: string }) => apiClient.post<APIResponse<{ entry_id: string }>>(`/admin/queue/${entryId}/assign`, body),
   reviewSummary:  (appId: string)                                                     => apiClient.get<APIResponse<ReviewSummary>>(`/admin/applications/${appId}/review-summary`),
+  getDocuments:   (appId: string)                                                     => apiClient.get<APIResponse<ApplicationDocument[]>>(`/admin/applications/${appId}/documents`),
   decide:         (appId: string, body: DecisionRequest)                              => apiClient.post<APIResponse<{ decision_id: string; action: string; new_status: string }>>(`/admin/applications/${appId}/decide`, body),
   activate:       (appId: string)                                                     => apiClient.post<APIResponse<AccountActivated>>(`/admin/applications/${appId}/activate`),
 }
@@ -123,4 +124,10 @@ export const notificationAPI = {
     apiClient.get<PaginatedResponse<NotificationRead>>('/notifications', { params }),
   retry: (notifId: string) =>
     apiClient.post<APIResponse<NotificationRead>>(`/notifications/${notifId}/retry`),
+}
+
+// ── Storage ─────────────────────────────────────────────────────────────────────
+export const storageAPI = {
+  getPresignedGetUrl: (storageKey: string) =>
+    apiClient.get<APIResponse<PresignedGetResponse>>(`/storage/presigned-get/${encodeURIComponent(storageKey)}`),
 }

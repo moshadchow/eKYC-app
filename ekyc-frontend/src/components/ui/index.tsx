@@ -2,6 +2,12 @@ import React from 'react'
 import { clsx } from 'clsx'
 import { Loader2, CheckCircle2, AlertCircle, Info, X } from 'lucide-react'
 
+// Re-export DocumentViewer
+export { DocumentViewer } from './DocumentViewer'
+
+// Re-export AuditTrailModal
+export { AuditTrailModal } from './AuditTrailModal'
+
 // ── Spinner ───────────────────────────────────────────────────────────────────
 export function Spinner({ size = 'md', className }: { size?: 'sm' | 'md' | 'lg'; className?: string }) {
   const s = { sm: 'h-4 w-4', md: 'h-5 w-5', lg: 'h-8 w-8' }[size]

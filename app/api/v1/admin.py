@@ -60,6 +60,26 @@ async def get_review_summary(
     return APIResponse(data=summary)
 
 
+@router.get("/applications/{app_id}/documents", response_model=APIResponse[list[dict]])
+async def get_application_documents(
+    app_id: uuid.UUID, current_agent: CurrentAgent, db: DBSession,
+):
+    """Get all documents for a KYC application."""
+    await crud_admin.get_application(db, app_id)  # Validate app exists
+    docs = await crud_admin.get_documents(db, app_id)
+    return APIResponse(data=[
+        {
+            "id": str(d.id),
+            "document_type": d.document_type,
+            "storage_key": d.storage_key,
+            "original_filename": d.original_filename,
+            "mime_type": d.mime_type,
+            "uploaded_at": d.uploaded_at.isoformat(),
+        }
+        for d in docs
+    ])
+
+
 @router.post("/applications/{app_id}/decide", response_model=APIResponse[dict])
 async def make_decision(
     app_id: uuid.UUID, body: DecisionRequest, request: Request,

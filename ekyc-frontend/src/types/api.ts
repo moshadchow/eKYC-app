@@ -203,6 +203,11 @@ export interface SelfieUploadUrlResponse {
   expires_in: number
 }
 
+export interface PresignedGetResponse {
+  url: string
+  expires_in: number
+}
+
 export interface FingerprintResult {
   matched: boolean
   similarity_score: number
@@ -328,6 +333,15 @@ export interface ReviewSummary {
   risk_classification: string | null
   risk_score: number | null
   edd_required: boolean
+}
+
+export interface ApplicationDocument {
+  id: string
+  document_type: string
+  storage_key: string
+  original_filename: string | null
+  mime_type: string
+  uploaded_at: string
 }
 
 export interface DecisionRequest {

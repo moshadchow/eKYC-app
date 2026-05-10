@@ -4,8 +4,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Shield, AlertTriangle, CheckCircle2, TrendingUp, FileText, Play, ChevronDown, ChevronUp, Upload, ArrowLeft } from 'lucide-react'
 import { complianceAPI, adminAPI } from '@/api/services'
 import { getErrorMessage } from '@/api/client'
-import { Card, Alert, Spinner, StatusBadge, Field, Input, Select } from '@/components/ui'
-import type { ReviewSummary, PEPCheckRequest } from '@/types/api'
+import { Card, Alert, Spinner, StatusBadge, Field, Input, Select, DocumentViewer } from '@/components/ui'
+import type { ReviewSummary, PEPCheckRequest, ApplicationDocument } from '@/types/api'
 
 export default function CompliancePage() {
   const { appId } = useParams<{ appId: string }>()
@@ -40,6 +40,12 @@ export default function CompliancePage() {
   const { data: summary } = useQuery({
     queryKey: ['review-summary', appId],
     queryFn: () => adminAPI.reviewSummary(appId!).then(r => r.data.data).catch(() => null),
+    enabled: !!appId,
+  })
+
+  const { data: documents } = useQuery({
+    queryKey: ['documents', appId],
+    queryFn: () => adminAPI.getDocuments(appId!).then(r => r.data.data ?? []),
     enabled: !!appId,
   })
 
@@ -141,6 +147,21 @@ export default function CompliancePage() {
               </span>
               {summary.pep_ip_flagged && <span className="badge badge-red">PEP/IP</span>}
             </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Documents Card */}
+      {documents && documents.length > 0 && (
+        <Card className="p-4">
+          <h3 className="section-title mb-3">Documents</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {documents.map((doc: ApplicationDocument) => (
+              <div key={doc.id} className="border border-surface-200 rounded-lg p-2 bg-white">
+                <DocumentViewer storageKey={doc.storage_key} alt={doc.document_type} className="mb-2" />
+                <p className="text-xs text-center capitalize text-surface-600">{doc.document_type.replace(/_/g, ' ')}</p>
+              </div>
+            ))}
           </div>
         </Card>
       )}
