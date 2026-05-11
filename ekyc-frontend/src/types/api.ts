@@ -228,6 +228,50 @@ export interface DocumentUploadRequest {
   checksum_sha256: string
 }
 
+export interface NIDUploadUrlResponse {
+  upload_url: string
+  storage_key: string
+  expires_in: number
+}
+
+export interface NIDOCRRequest {
+  nid_front_key: string
+  nid_back_key: string
+}
+
+export interface OCRResult {
+  id: string
+  kyc_application_id: string
+  document_id: string
+  extracted_name_en: string | null
+  extracted_name_bn: string | null
+  extracted_nid: string | null
+  extracted_dob: string | null
+  extracted_address: string | null
+  extracted_fathers_name: string | null
+  extracted_mothers_name: string | null
+  confidence_score: number | null
+  raw_json: string
+  created_at: string
+  attempt_number?: number
+  ocr_provider?: string
+  field_confidence?: {
+    name_en?: number
+    name_bn?: number
+    nid?: number
+    dob?: number
+    address?: number
+    fathers_name?: number
+    mothers_name?: number
+  }
+  quality_flags?: {
+    glare_detected?: boolean
+    blur_detected?: boolean
+    rotation_detected?: boolean
+    image_too_dark?: boolean
+  }
+}
+
 export interface VerificationStatus {
   app_id: string
   total_attempts: number

@@ -1,7 +1,7 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowRight, ArrowLeft, CheckCircle2, RotateCcw, Camera, Fingerprint } from 'lucide-react'
-import { applicationsAPI, verificationAPI, uploadSelfieBlob } from '@/api/services'
+import { ArrowRight, ArrowLeft, CheckCircle2, RotateCcw, Camera, Fingerprint, Upload } from 'lucide-react'
+import { applicationsAPI, verificationAPI, uploadSelfieBlob, uploadFileBlob } from '@/api/services'
 import { useOnboardingStore } from '@/store/onboardingStore'
 import { getErrorMessage } from '@/api/client'
 import { Alert, Card, Field, Input, Select, Steps, Spinner } from '@/components/ui'
@@ -80,47 +80,256 @@ export default function AgentOnboardingPage() {
     )
   }
 
-  // ── Step 2: NID ────────────────────────────────────────────────────────────
+  // ── Step 2: NID (3-phase: upload → OCR → review+validate) ─────────────────
   function NIDStep() {
-    const [nid, setNid] = useState(store.nidRecord?.nid_number ?? '')
-    const [dob, setDob] = useState(store.nidRecord?.date_of_birth ?? '')
+    const [frontPreview, setFrontPreview] = useState<string | null>(null)
+    const [backPreview, setBackPreview]   = useState<string | null>(null)
+    const [uploadingFront, setUploadingFront] = useState(false)
+    const [uploadingBack, setUploadingBack]   = useState(false)
+    const [ocrLoading, setOcrLoading] = useState(false)
+    const [ocrError, setOcrError]     = useState('')
+    const [manualMode, setManualMode] = useState(false)
+    const [nid, setNid] = useState(store.ocrResult?.extracted_nid ?? store.nidRecord?.nid_number ?? '')
+    const [dob, setDob] = useState(store.ocrResult?.extracted_dob ?? store.nidRecord?.date_of_birth ?? '')
 
-    async function handle() {
+    useEffect(() => {
+      if (store.nidFrontKey && store.nidBackKey && !store.ocrResult && !ocrLoading && !ocrError && !manualMode) {
+        runOcr()
+      }
+    }, [store.nidFrontKey, store.nidBackKey])
+
+    useEffect(() => {
+      if (store.ocrResult) {
+        if (store.ocrResult.extracted_nid) setNid(store.ocrResult.extracted_nid)
+        if (store.ocrResult.extracted_dob) setDob(store.ocrResult.extracted_dob)
+      }
+    }, [store.ocrResult])
+
+    async function computeSha256(file: File): Promise<string> {
+      const buf = await file.arrayBuffer()
+      const hashBuf = await crypto.subtle.digest('SHA-256', buf)
+      return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('')
+    }
+
+    async function handleFileSelect(file: File, side: 'front' | 'back') {
+      if (!appId) return
+      if (!file.type.startsWith('image/')) {
+        setError('Only image files are accepted (JPEG, PNG, WebP).')
+        return
+      }
+      if (file.size > 10_000_000) {
+        setError('File is too large. Please use an image under 10 MB.')
+        return
+      }
+      const setter = side === 'front' ? setUploadingFront : setUploadingBack
+      setter(true); setError('')
+      try {
+        // Step 1 — S3 upload (optional; silently skipped when MinIO unavailable in dev)
+        let storage_key = `nid/${appId}/${side}/${Date.now()}.jpg`
+        try {
+          const urlRes = await verificationAPI.getNIDUploadUrl(appId, side, file.type || 'image/jpeg')
+          if (urlRes.data.data) {
+            const { upload_url, storage_key: key } = urlRes.data.data
+            await uploadFileBlob(upload_url, file)
+            storage_key = key
+          }
+        } catch { /* S3 unavailable in dev — use generated key */ }
+
+        // Step 2 — DB registration (always runs so OCR can find the document row)
+        const checksum = await computeSha256(file)
+        try {
+          await verificationAPI.uploadDocument(appId, {
+            document_type: side === 'front' ? 'nid_front' : 'nid_back',
+            storage_key, mime_type: file.type || 'image/jpeg',
+            file_size_bytes: file.size, checksum_sha256: checksum,
+          })
+        } catch { /* best-effort in dev */ }
+
+        const preview = URL.createObjectURL(file)
+        if (side === 'front') { setFrontPreview(preview); store.setNIDFrontKey(storage_key) }
+        else                  { setBackPreview(preview);  store.setNIDBackKey(storage_key) }
+      } catch (err) { setError(getErrorMessage(err)) }
+      finally { setter(false) }
+    }
+
+    async function runOcr() {
+      if (!store.nidFrontKey || !store.nidBackKey) return
+      setOcrLoading(true); setOcrError('')
+      try {
+        const res = await verificationAPI.runOCR(appId, {
+          nid_front_key: store.nidFrontKey,
+          nid_back_key:  store.nidBackKey,
+        })
+        if (res.data.data) store.setOCRResult(res.data.data)
+      } catch (err) { setOcrError(getErrorMessage(err)) }
+      finally { setOcrLoading(false) }
+    }
+
+    function retakePhotos() {
+      store.setNIDFrontKey(''); store.setNIDBackKey('')
+      store.setOCRResult(null as any)
+      setFrontPreview(null); setBackPreview(null)
+      setOcrError(''); setManualMode(false); setNid(''); setDob('')
+    }
+
+    async function handleValidate() {
       if (!nid || !dob || !appId) return
       setLoading(true); setError('')
       try {
         const res = await verificationAPI.validateNID(appId, { nid_number: nid, date_of_birth: dob })
-        if (res.data.data) {
-          store.setNIDRecord(res.data.data)
-          setStep('fingerprint')
-        }
+        if (res.data.data) { store.setNIDRecord(res.data.data); setStep('fingerprint') }
       } catch (err) { setError(getErrorMessage(err)) }
       finally { setLoading(false) }
     }
 
+    const confidence = store.ocrResult?.confidence_score ?? null
+    const confidenceBadge = confidence === null ? null
+      : confidence >= 0.8 ? <span className="text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full">Confidence {(confidence * 100).toFixed(0)}%</span>
+      : confidence >= 0.5 ? <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">Confidence {(confidence * 100).toFixed(0)}%</span>
+      : <span className="text-xs font-medium text-red-700 bg-red-50 px-2 py-0.5 rounded-full">Confidence {(confidence * 100).toFixed(0)}%</span>
+
+    // Phase A
+    if (!store.nidFrontKey || !store.nidBackKey) {
+      return (
+        <div className="space-y-5">
+          <div>
+            <h2 className="text-lg font-semibold text-surface-900">NID Verification</h2>
+            <p className="text-sm text-surface-500 mt-1">Upload customer's NID card — front and back</p>
+          </div>
+          {error && <Alert variant="error" onDismiss={() => setError('')}>{error}</Alert>}
+          <p className="text-xs text-surface-500 bg-surface-50 rounded-lg px-4 py-3">
+            Place the card on a flat surface with good lighting. Avoid glare and shadows.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            {(['front', 'back'] as const).map(side => {
+              const isUploading = side === 'front' ? uploadingFront : uploadingBack
+              const preview     = side === 'front' ? frontPreview   : backPreview
+              const isDone      = side === 'front' ? !!store.nidFrontKey : !!store.nidBackKey
+              return (
+                <label key={side} className={`relative flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-4 cursor-pointer transition-colors ${isDone ? 'border-green-400 bg-green-50' : 'border-surface-300 hover:border-brand-400 bg-surface-50'}`}>
+                  <input type="file" accept="image/*" capture="environment" className="sr-only"
+                    disabled={isUploading}
+                    onChange={e => { if (e.target.files?.[0]) handleFileSelect(e.target.files[0], side) }}
+                  />
+                  {preview
+                    ? <img src={preview} alt={`NID ${side}`} className="w-full h-24 object-cover rounded-lg mb-2" />
+                    : <Upload className={`h-8 w-8 mb-2 ${isDone ? 'text-green-500' : 'text-surface-400'}`} />
+                  }
+                  {isUploading ? <Spinner size="sm" />
+                    : isDone ? <span className="text-xs font-medium text-green-700 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> Uploaded</span>
+                    : <span className="text-xs text-surface-500">NID {side === 'front' ? 'Front' : 'Back'}</span>
+                  }
+                </label>
+              )
+            })}
+          </div>
+          <div className="flex gap-3">
+            {!urlAppId && (
+              <button onClick={() => setStep('create')} className="btn-secondary flex-1"><ArrowLeft className="h-4 w-4" /> Back</button>
+            )}
+            <button className="btn-primary flex-1" disabled={!store.nidFrontKey || !store.nidBackKey}>
+              <span>Next: Extract Data</span><ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    // Phase B
+    if (!store.ocrResult && !manualMode) {
+      return (
+        <div className="space-y-5">
+          <div>
+            <h2 className="text-lg font-semibold text-surface-900">NID Verification</h2>
+            <p className="text-sm text-surface-500 mt-1">Reading NID card…</p>
+          </div>
+          {ocrLoading && (
+            <div className="flex flex-col items-center justify-center py-10 gap-3">
+              <Spinner size="lg" />
+              <p className="text-sm text-surface-500">Extracting data from NID card…</p>
+            </div>
+          )}
+          {ocrError && (
+            <div className="space-y-3">
+              <Alert variant="error">{ocrError}</Alert>
+              <div className="flex gap-3">
+                <button onClick={runOcr} className="btn-secondary flex-1"><RotateCcw className="h-4 w-4" /> Retry</button>
+                <button onClick={() => setManualMode(true)} className="btn-ghost flex-1 text-sm">Enter manually</button>
+              </div>
+            </div>
+          )}
+          <button onClick={retakePhotos} className="btn-ghost w-full text-sm"><ArrowLeft className="h-4 w-4" /> Retake Photos</button>
+        </div>
+      )
+    }
+
+    // Phase C
+    const ocrBlocked = (store.ocrResult?.confidence_score ?? 1) < 0.5
     return (
       <div className="space-y-5">
-        <div>
-          <h2 className="text-lg font-semibold text-surface-900">NID Verification</h2>
-          <p className="text-sm text-surface-500 mt-1">Validate customer's National Identity Card</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-surface-900">NID Verification</h2>
+            <p className="text-sm text-surface-500 mt-1">Review extracted information and validate</p>
+          </div>
+          <div className="flex items-center">
+            {confidenceBadge}
+            {import.meta.env.DEV && store.ocrResult?.ocr_provider && (
+              <code className="text-xs bg-surface-100 text-surface-500 px-1.5 py-0.5 rounded ml-2">
+                OCR: {store.ocrResult.ocr_provider}
+              </code>
+            )}
+          </div>
         </div>
+        {store.ocrResult?.attempt_number && store.ocrResult.attempt_number > 1 && (
+          <p className="text-xs text-surface-400">Extraction attempt {store.ocrResult.attempt_number}</p>
+        )}
         {error && <Alert variant="error" onDismiss={() => setError('')}>{error}</Alert>}
+        {confidence !== null && confidence < 0.8 && !ocrBlocked && (
+          <Alert variant="warning">OCR confidence is low. Please verify the fields below carefully.</Alert>
+        )}
         {store.nidRecord && (
           <Alert variant="success">NID verified — <strong>{store.nidRecord.full_name_en}</strong></Alert>
+        )}
+        {store.ocrResult && (
+          <div className="bg-surface-50 rounded-xl p-4 space-y-2 text-sm">
+            {store.ocrResult.extracted_name_en      && <div className="flex justify-between"><span className="text-surface-500">Name (EN)</span><span className="font-medium">{store.ocrResult.extracted_name_en}</span></div>}
+            {store.ocrResult.extracted_name_bn      && <div className="flex justify-between"><span className="text-surface-500">Name (BN)</span><span className="font-medium">{store.ocrResult.extracted_name_bn}</span></div>}
+            {store.ocrResult.extracted_fathers_name && <div className="flex justify-between"><span className="text-surface-500">Father</span><span className="font-medium">{store.ocrResult.extracted_fathers_name}</span></div>}
+            {store.ocrResult.extracted_mothers_name && <div className="flex justify-between"><span className="text-surface-500">Mother</span><span className="font-medium">{store.ocrResult.extracted_mothers_name}</span></div>}
+            {store.ocrResult.extracted_address      && <div className="flex justify-between"><span className="text-surface-500">Address</span><span className="font-medium text-right max-w-xs">{store.ocrResult.extracted_address}</span></div>}
+          </div>
+        )}
+        {store.ocrResult && !store.ocrResult.extracted_nid && (
+          <Alert variant="warning">NID number could not be read from the card. Enter it manually or retake photos.</Alert>
+        )}
+        {store.ocrResult && !store.ocrResult.extracted_dob && (
+          <Alert variant="warning">Date of birth could not be read from the card. Enter it manually or retake photos.</Alert>
         )}
         <Field label="NID Number" required>
           <Input placeholder="10–17 digit NID number" value={nid} onChange={e => setNid(e.target.value)} />
         </Field>
+        {store.ocrResult?.field_confidence?.nid !== undefined &&
+         store.ocrResult.field_confidence.nid < 0.7 && (
+          <p className="text-xs text-amber-600 -mt-3">
+            NID confidence {(store.ocrResult.field_confidence.nid * 100).toFixed(0)}% — verify carefully
+          </p>
+        )}
         <Field label="Date of Birth" required>
           <Input type="date" value={dob} onChange={e => setDob(e.target.value)} />
         </Field>
+        {store.ocrResult?.field_confidence?.dob !== undefined &&
+         store.ocrResult.field_confidence.dob < 0.7 && (
+          <p className="text-xs text-amber-600 -mt-3">
+            DOB confidence {(store.ocrResult.field_confidence.dob * 100).toFixed(0)}% — verify carefully
+          </p>
+        )}
+        {ocrBlocked && (
+          <Alert variant="error">OCR confidence is too low to proceed. Please retake the NID photos for a clearer scan.</Alert>
+        )}
         <div className="flex gap-3">
-          {!urlAppId && (
-            <button onClick={() => setStep('create')} className="btn-secondary flex-1">
-              <ArrowLeft className="h-4 w-4" /> Back
-            </button>
-          )}
-          <button onClick={handle} className="btn-primary flex-1" disabled={loading || !nid || !dob}>
+          <button onClick={retakePhotos} className="btn-ghost flex-1 text-sm"><ArrowLeft className="h-4 w-4" /> Retake Photos</button>
+          <button onClick={handleValidate} className="btn-primary flex-1" disabled={loading || !nid || !dob || ocrBlocked}>
             {loading ? <Spinner size="sm" /> : <><span>Validate NID</span><ArrowRight className="h-4 w-4" /></>}
           </button>
         </div>
@@ -293,9 +502,14 @@ export default function AgentOnboardingPage() {
       try {
         const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } })
         setStream(s)
-        if (videoRef.current) videoRef.current.srcObject = s
       } catch { setCameraError('Camera access denied. Please allow camera access.') }
     }, [])
+
+    useEffect(() => {
+      if (stream && videoRef.current) {
+        videoRef.current.srcObject = stream
+      }
+    }, [stream])
 
     function stopCamera() { stream?.getTracks().forEach(t => t.stop()); setStream(null) }
 

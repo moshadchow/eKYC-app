@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { PreCheckResult, ApplicationRead, NIDRecord, FaceMatchResult, FingerprintResult, OnboardingChannelValue, VerificationStatus } from '@/types/api'
+import type { PreCheckResult, ApplicationRead, NIDRecord, FaceMatchResult, FingerprintResult, OnboardingChannelValue, VerificationStatus, OCRResult } from '@/types/api'
 
 export type OnboardingStep =
   | 'pre_check'
@@ -27,6 +27,9 @@ interface OnboardingState {
   profileSaved: boolean
   nomineeSaved: boolean
   signatureSaved: boolean
+  nidFrontKey:  string | null
+  nidBackKey:   string | null
+  ocrResult:    OCRResult | null
 
   setStep:                (step: OnboardingStep) => void
   setPreCheckResult:      (r: PreCheckResult) => void
@@ -41,6 +44,9 @@ interface OnboardingState {
   markProfileSaved:       () => void
   markNomineeSaved:       () => void
   markSignatureSaved:     () => void
+  setNIDFrontKey:         (key: string) => void
+  setNIDBackKey:          (key: string) => void
+  setOCRResult:           (r: OCRResult) => void
   reset:                  () => void
 }
 
@@ -57,6 +63,9 @@ const initial = {
   profileSaved: false,
   nomineeSaved: false,
   signatureSaved: false,
+  nidFrontKey: null,
+  nidBackKey:  null,
+  ocrResult:   null,
 }
 
 export const useOnboardingStore = create<OnboardingState>()(
@@ -76,6 +85,9 @@ export const useOnboardingStore = create<OnboardingState>()(
       markProfileSaved:      ()     => set({ profileSaved: true }),
       markNomineeSaved:      ()     => set({ nomineeSaved: true }),
       markSignatureSaved:    ()     => set({ signatureSaved: true }),
+      setNIDFrontKey:        (key)  => set({ nidFrontKey: key }),
+      setNIDBackKey:         (key)  => set({ nidBackKey: key }),
+      setOCRResult:          (r)    => set({ ocrResult: r }),
       reset:                 ()     => set({
     currentStep: 'pre_check' as OnboardingStep,
     preCheckResult: null,
@@ -89,6 +101,9 @@ export const useOnboardingStore = create<OnboardingState>()(
     profileSaved: false,
     nomineeSaved: false,
     signatureSaved: false,
+    nidFrontKey: null,
+    nidBackKey:  null,
+    ocrResult:   null,
   }),
     }),
     { name: 'ekyc-onboarding' }

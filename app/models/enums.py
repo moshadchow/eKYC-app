@@ -251,6 +251,7 @@ class AuditAction(str, Enum):
     account_activated = "account_activated"
     kyc_refresh_completed = "kyc_refresh_completed"
     kyc_refresh_reminder = "kyc_refresh_reminder"
+    failed = "failed"
 
 
 class RefreshStatus(str, Enum):

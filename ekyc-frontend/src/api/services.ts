@@ -6,6 +6,7 @@ import type {
   CreateApplicationRequest, ApplicationRead, CustomerProfileRequest,
   NomineeRequest, SignatureRequest, NIDVerifyRequest, NIDRecord,
   FaceMatchRequest, FaceMatchResult, FingerprintResult, SelfieUploadUrlResponse, DocumentUploadRequest, VerificationStatus,
+  NIDUploadUrlResponse, NIDOCRRequest, OCRResult,
   ScreeningResultItem, PEPCheckRequest, RiskScoreRequest, RiskScoreResult,
   EDDRequestResult, EDDStatus_t, QueueEntry, ReviewSummary, ApplicationDocument,
   DecisionRequest, AccountActivated, RefreshSchedule, ScheduleListItem,
@@ -59,10 +60,23 @@ export const verificationAPI = {
   getSelfieUploadUrl: (appId: string, contentType = 'image/jpeg') =>
     apiClient.get<APIResponse<SelfieUploadUrlResponse>>(`/kyc/applications/${appId}/selfie-upload-url`, { params: { content_type: contentType } }),
   status:         (appId: string)                            => apiClient.get<APIResponse<VerificationStatus>>(`/kyc/applications/${appId}/verify/status`),
-  uploadDocument: (appId: string, body: DocumentUploadRequest) => apiClient.post<APIResponse<{ document_id: string; version: number }>>(`/kyc/applications/${appId}/documents/upload`, body),
+  uploadDocument:  (appId: string, body: DocumentUploadRequest) => apiClient.post<APIResponse<{ document_id: string; version: number }>>(`/kyc/applications/${appId}/documents/upload`, body),
+  getNIDUploadUrl: (appId: string, side: 'front' | 'back', contentType = 'image/jpeg') =>
+    apiClient.get<APIResponse<NIDUploadUrlResponse>>(`/kyc/applications/${appId}/nid-upload-url`, { params: { side, content_type: contentType } }),
+  runOCR: (appId: string, body: NIDOCRRequest) =>
+    apiClient.post<APIResponse<OCRResult>>(`/kyc/applications/${appId}/ocr/nid`, body),
 }
 
 // ── Selfie Upload (direct PUT to object storage — no auth header) ─────────────
+export async function uploadFileBlob(uploadUrl: string, blob: Blob): Promise<void> {
+  const res = await fetch(uploadUrl, {
+    method: 'PUT',
+    body: blob,
+    headers: { 'Content-Type': blob.type || 'image/jpeg' },
+  })
+  if (!res.ok) throw new Error(`File upload failed: ${res.status} ${res.statusText}`)
+}
+
 export async function uploadSelfieBlob(uploadUrl: string, blob: Blob): Promise<void> {
   const res = await fetch(uploadUrl, {
     method: 'PUT',

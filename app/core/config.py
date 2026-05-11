@@ -44,6 +44,17 @@ class Settings(BaseSettings):
     STORAGE_ACCESS_KEY: str = "minioadmin"
     STORAGE_SECRET_KEY: str = "minioadmin"
 
+    # OCR extraction
+    OCR_PROVIDER: str = "mock"
+    OCR_API_KEY: str = ""
+    OCR_API_ENDPOINT: str = ""
+    OCR_CONFIDENCE_THRESHOLD: float = 0.60
+
+    # EC (Election Commission) verification
+    EC_PROVIDER: str = "mock"
+    EC_API_ENDPOINT: str = ""
+    EC_API_KEY: str = ""
+
     # Notification gateway
     NOTIFICATION_MOCK: bool = True
     SMS_GATEWAY_URL: str = ""

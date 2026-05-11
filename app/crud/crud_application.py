@@ -243,14 +243,24 @@ class CRUDApplication:
                     status_code=422,
                     detail="storage_key required for wet/electronic signature",
                 )
-        sig = DigitalSignature(
-            kyc_application_id=app.id,
-            signature_type=signature_type.value,
-            storage_key=storage_key,
-            pin_hash=hash_password(pin) if pin else None,
-            is_low_risk_pin=(signature_type == SignatureType.pin),
+        result = await db.execute(
+            select(DigitalSignature).where(DigitalSignature.kyc_application_id == app.id)
         )
-        db.add(sig)
+        sig = result.scalars().first()
+        if sig:
+            sig.signature_type = signature_type.value
+            sig.storage_key = storage_key
+            sig.pin_hash = hash_password(pin) if pin else None
+            sig.is_low_risk_pin = (signature_type == SignatureType.pin)
+        else:
+            sig = DigitalSignature(
+                kyc_application_id=app.id,
+                signature_type=signature_type.value,
+                storage_key=storage_key,
+                pin_hash=hash_password(pin) if pin else None,
+                is_low_risk_pin=(signature_type == SignatureType.pin),
+            )
+            db.add(sig)
         await db.flush()
         return sig
 

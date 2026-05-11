@@ -275,6 +275,10 @@ class OCRExtractionBase(SQLModel):
     extracted_fathers_name: Optional[str] = Field(default=None, max_length=255)
     extracted_mothers_name: Optional[str] = Field(default=None, max_length=255)
     confidence_score: Optional[float] = Field(default=None)
+    attempt_number: int = Field(default=1, sa_column=sa.Column(sa.Integer, nullable=False, server_default="1"))
+    ocr_provider: Optional[str] = Field(default=None, sa_column=sa.Column(sa.String(50), nullable=True))
+    field_confidence_json: Optional[str] = Field(default=None, sa_column=sa.Column(sa.Text, nullable=True))
+    quality_flags_json: Optional[str] = Field(default=None, sa_column=sa.Column(sa.Text, nullable=True))
 
 
 class OCRExtraction(OCRExtractionBase, table=True):
