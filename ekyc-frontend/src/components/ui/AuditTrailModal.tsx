@@ -1,4 +1,3 @@
-import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Activity, X } from 'lucide-react'
 import { auditAPI } from '@/api/services'

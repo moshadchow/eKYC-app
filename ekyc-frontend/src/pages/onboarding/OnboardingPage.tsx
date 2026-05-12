@@ -157,16 +157,95 @@ export default function OnboardingPage() {
       return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('')
     }
 
+    async function validateNIDImage(file: File, side: 'front' | 'back'): Promise<string | null> {
+      return new Promise(resolve => {
+        const img = new Image()
+        const url = URL.createObjectURL(file)
+        img.onload = () => {
+          URL.revokeObjectURL(url)
+          const { naturalWidth: w, naturalHeight: h } = img
+
+          // Must be landscape (wider than tall)
+          if (h >= w) {
+            resolve(`The NID ${side} image must be in landscape orientation (wider than tall). Rotate your photo and try again.`)
+            return
+          }
+          // Aspect ratio must be between 1.3:1 and 2.0:1 (NID card is ~1.585:1)
+          const ratio = w / h
+          if (ratio < 1.3 || ratio > 2.0) {
+            resolve(`This doesn't look like an NID card photo. Please photograph only the ${side} of your National ID card.`)
+            return
+          }
+          // Minimum resolution: 300×190 px
+          if (w < 300 || h < 190) {
+            resolve('Image resolution is too low. Please take a clearer, closer photo of the NID card.')
+            return
+          }
+
+          // ── Side-specific pixel analysis via canvas ──────────────────────────
+          // Calibrated against real Bangladesh NID card scans:
+          //   Front: bottom30 brightness ~204, left-25% colorVariance ~11.6
+          //   Back:  bottom30 brightness ~171, left-25% colorVariance ~2.1
+          const SW = 160, SH = Math.round(160 / ratio)
+          const canvas = document.createElement('canvas')
+          canvas.width = SW; canvas.height = SH
+          const ctx = canvas.getContext('2d')!
+          ctx.drawImage(img, 0, 0, SW, SH)
+
+          function avgBrightness(x: number, y: number, rw: number, rh: number): number {
+            const data = ctx.getImageData(x, y, rw, rh).data
+            let sum = 0
+            for (let i = 0; i < data.length; i += 4)
+              sum += 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
+            return sum / (data.length / 4)
+          }
+
+          // Back has a barcode band: bottom 30% is noticeably darker (< 185)
+          const bottom30Brightness = avgBrightness(0, Math.round(SH * 0.70), SW, Math.round(SH * 0.30))
+          const hasBarcode = bottom30Brightness < 185
+
+          // Front has a portrait photo: left 25% has colour variance > 6
+          const leftRegion = ctx.getImageData(0, 0, Math.round(SW * 0.25), SH).data
+          let colorVariance = 0
+          for (let i = 0; i < leftRegion.length; i += 4) {
+            const mean = (leftRegion[i] + leftRegion[i + 1] + leftRegion[i + 2]) / 3
+            colorVariance += Math.abs(leftRegion[i] - mean) + Math.abs(leftRegion[i + 1] - mean) + Math.abs(leftRegion[i + 2] - mean)
+          }
+          colorVariance /= (leftRegion.length / 4)
+          const hasPhotoRegion = colorVariance > 6
+
+          if (side === 'front') {
+            if (hasBarcode && !hasPhotoRegion) {
+              resolve('This looks like the NID back side. Please upload the front of your NID card (the side with your photo and ID number).')
+              return
+            }
+          } else {
+            if (!hasBarcode && hasPhotoRegion) {
+              resolve('This looks like the NID front side. Please upload the back of your NID card (the side with your address and barcode).')
+              return
+            }
+          }
+
+          resolve(null)
+        }
+        img.onerror = () => { URL.revokeObjectURL(url); resolve('Could not read the image file. Please try a different photo.') }
+        img.src = url
+      })
+    }
+
     async function handleFileSelect(file: File, side: 'front' | 'back') {
       if (!appId) return
-      if (!file.type.startsWith('image/')) {
-        setError('Only image files are accepted (JPEG, PNG, WebP).')
+      const ALLOWED_NID_MIME = ['image/jpeg', 'image/png', 'image/webp']
+      if (!ALLOWED_NID_MIME.includes(file.type)) {
+        setError('Only JPEG, PNG, or WebP photos of your NID card are accepted.')
         return
       }
       if (file.size > 10_000_000) {
         setError('File is too large. Please use an image under 10 MB.')
         return
       }
+      const imgError = await validateNIDImage(file, side)
+      if (imgError) { setError(imgError); return }
       const setter = side === 'front' ? setUploadingFront : setUploadingBack
       setter(true)
       setError('')
@@ -255,19 +334,54 @@ export default function OnboardingPage() {
             <p className="text-sm text-surface-500 mt-1">Upload photos of your National ID card — front and back</p>
           </div>
           {error && <Alert variant="error" onDismiss={() => setError('')}>{error}</Alert>}
-          <p className="text-xs text-surface-500 bg-surface-50 rounded-lg px-4 py-3">
-            Place the card on a flat surface with good lighting. Avoid glare and shadows.
-          </p>
+
+          {/* NID card diagram guide */}
+          <div className="bg-surface-50 rounded-xl px-4 py-3 space-y-2">
+            <p className="text-xs font-medium text-surface-600">How to photograph your NID card</p>
+            <div className="grid grid-cols-2 gap-3">
+              {/* Front guide */}
+              <div className="flex flex-col items-center gap-1.5">
+                <div className="w-full border border-surface-300 rounded-lg bg-white px-2 py-1.5 flex flex-col gap-1" style={{aspectRatio:'1.6/1'}}>
+                  <div className="flex gap-1.5 items-center">
+                    <div className="w-5 h-6 rounded bg-surface-200 flex-shrink-0" />
+                    <div className="flex-1 space-y-0.5">
+                      <div className="h-1.5 bg-surface-200 rounded w-full" />
+                      <div className="h-1.5 bg-surface-200 rounded w-3/4" />
+                      <div className="h-1.5 bg-surface-200 rounded w-1/2" />
+                    </div>
+                  </div>
+                  <div className="h-1.5 bg-red-200 rounded w-2/3 mx-auto mt-auto" />
+                </div>
+                <p className="text-xs text-surface-500">Front — photo &amp; ID number side</p>
+              </div>
+              {/* Back guide */}
+              <div className="flex flex-col items-center gap-1.5">
+                <div className="w-full border border-surface-300 rounded-lg bg-white px-2 py-1.5 flex flex-col justify-between gap-1" style={{aspectRatio:'1.6/1'}}>
+                  <div className="space-y-0.5">
+                    <div className="h-1.5 bg-surface-200 rounded w-full" />
+                    <div className="h-1.5 bg-surface-200 rounded w-5/6" />
+                    <div className="h-1.5 bg-surface-200 rounded w-2/3" />
+                  </div>
+                  <div className="h-3 bg-surface-300 rounded w-full mt-auto" style={{backgroundImage:'repeating-linear-gradient(90deg,#94a3b8 0,#94a3b8 2px,transparent 2px,transparent 5px)'}} />
+                </div>
+                <p className="text-xs text-surface-500">Back — address &amp; barcode side</p>
+              </div>
+            </div>
+            <p className="text-xs text-surface-400">Place the card on a flat surface · good lighting · no glare · JPEG, PNG or WebP · max 10 MB</p>
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             {(['front', 'back'] as const).map(side => {
               const isUploading = side === 'front' ? uploadingFront : uploadingBack
               const preview     = side === 'front' ? frontPreview   : backPreview
               const isDone      = side === 'front' ? !!store.nidFrontKey : !!store.nidBackKey
+              const label       = side === 'front' ? 'NID Front' : 'NID Back'
+              const sublabel    = side === 'front' ? 'Photo & ID number side' : 'Address & barcode side'
               return (
                 <label key={side} className={`relative flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-4 cursor-pointer transition-colors ${isDone ? 'border-green-400 bg-green-50' : 'border-surface-300 hover:border-brand-400 bg-surface-50'}`}>
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/jpeg,image/png,image/webp"
                     capture="environment"
                     className="sr-only"
                     disabled={isUploading}
@@ -282,7 +396,10 @@ export default function OnboardingPage() {
                     ? <Spinner size="sm" />
                     : isDone
                       ? <span className="text-xs font-medium text-green-700 flex items-center gap-1"><CheckCircle2 className="h-3 w-3" /> Uploaded</span>
-                      : <span className="text-xs text-surface-500">NID {side === 'front' ? 'Front' : 'Back'}</span>
+                      : <div className="text-center">
+                          <p className="text-xs font-medium text-surface-600">{label}</p>
+                          <p className="text-xs text-surface-400">{sublabel}</p>
+                        </div>
                   }
                 </label>
               )

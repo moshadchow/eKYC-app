@@ -48,6 +48,8 @@ class DocumentUploadRequest(BaseModel):
 ALLOWED_SELFIE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 ALLOWED_NID_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 ALLOWED_NID_SIDES = {"front", "back"}
+ALLOWED_NID_DOCUMENT_TYPES = {DocumentType.nid_front, DocumentType.nid_back}
+ALLOWED_NID_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 
 class SelfieUploadUrlResponse(BaseModel):
@@ -277,6 +279,17 @@ async def register_document(
 ):
     """Phase 5: Register document metadata after binary upload via presigned URL."""
     await crud_verification.get_application(db, app_id, actor.id)
+    if body.document_type in ALLOWED_NID_DOCUMENT_TYPES:
+        if body.mime_type not in ALLOWED_NID_MIME_TYPES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"NID images must be JPEG, PNG, or WebP. Got: {body.mime_type}",
+            )
+        if body.file_size_bytes <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail="file_size_bytes must be greater than 0",
+            )
     doc = await crud_verification.register_document(
         db, app_id, body.document_type, body.storage_key,
         body.mime_type, body.file_size_bytes, body.checksum_sha256,
